@@ -21,19 +21,19 @@ import itertools
 from oslo.config import cfg
 from oslo.utils import timeutils
 
-from ceilometer.central import plugin
+from ceilometer.agent import plugin_base
 from ceilometer import sample
 from neutronclient.v2_0 import client as clientN
 from netaddr import *
 
 
 
-tmp_grp=[ cfg.StrOpt('location', default=None, help=_('no descr')),
-        cfg.FloatOpt('latitude', default=None, help=_('no descr')),
-        cfg.FloatOpt('longitude', default=None, help=_('no descr')),
-        cfg.ListOpt('netlist', default=None, help=_('no descr')),
-        cfg.FloatOpt('ram_allocation_ratio', default=None, help=_('no descr')),
-        cfg.FloatOpt('cpu_allocation_ratio', default=None, help=_('no descr')),
+tmp_grp=[ cfg.StrOpt('location', default=None, help='no descr'),
+        cfg.FloatOpt('latitude', default=None, help='no descr'),
+        cfg.FloatOpt('longitude', default=None, help='no descr'),
+        cfg.ListOpt('netlist', default=None, help='no descr'),
+        cfg.FloatOpt('ram_allocation_ratio', default=None, help='no descr'),
+        cfg.FloatOpt('cpu_allocation_ratio', default=None, help='no descr'),
       ]
 
 cfg.CONF.register_opts(tmp_grp, group='region')
@@ -42,7 +42,7 @@ metaD={"name":None, "latitude":None,"longitude":None,"location":None, "ram_alloc
 
 
 
-class _Base(plugin.CentralPollster):
+class _Base(plugin_base.PollsterBase)):
 
     @property
     def default_discovery(self):
