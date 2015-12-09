@@ -42,7 +42,7 @@ metaD={"name":None, "latitude":None,"longitude":None,"location":None, "ram_alloc
 
 
 
-class _Base(plugin_base.PollsterBase)):
+class _Base(plugin_base.PollsterBase):
 
     @property
     def default_discovery(self):
