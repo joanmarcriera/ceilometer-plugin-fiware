@@ -15,14 +15,17 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-from oslo.utils import timeutils
-from ceilometer.compute import plugin
+import ceilometer
+from ceilometer.compute import pollsters
 from ceilometer.compute.pollsters import util
+from ceilometer.compute.virt import inspector as virt_inspector
+from ceilometer.i18n import _, _LW
 from ceilometer import sample
+from oslo.utils import timeutils
 from oslo.config import cfg
 from novaclient import client
 
-class HostPollster(plugin.ComputePollster):
+class HostPollster(pollsters.BaseComputePollster):
 
     @staticmethod
     def get_samples(manager, cache, resources):

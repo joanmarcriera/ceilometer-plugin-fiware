@@ -98,9 +98,10 @@ __TO DO__ -we have to understand how monasca already manage this checks!-
 ### Compute agent pollsters
 
 #### Pollster for host
-1. Add this row to the file ``/etc/nova/nova.conf`` in the section ``[DEFAULT]`` and restart the nova-compute service
+1. Add these rows to the file ``/etc/nova/nova.conf`` in the section ``[DEFAULT]`` and restart the nova-compute service
 ```
-compute_monitors=ComputeDriverCPUMonitor
+compute_monitors = ComputeDriverCPUMonitor
+notification_driver = messagingv2
 ```
 2. Copy the __host.py__ file from the compute_pollster folder into this folder ``/usr/lib/python2.7/dist-packages/ceilometer/compute/pollsters``
 3. enable the pollster by adding the following row inside the file ``/usr/lib/python2.7/dist-packages/ceilometer-2014.2.2.egg-info/entry_points.txt
