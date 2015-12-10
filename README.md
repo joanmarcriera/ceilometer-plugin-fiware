@@ -131,6 +131,7 @@ compute.info = ceilometer.compute.pollsters.host:HostPollster
 
 #### Pollster for vm
 __NOT NEEDED IF YOU HAVE A CEILOMETER FOR OPENSTACK KILO__
+
 1. Replace the __inspector.py__ in the folder ``/usr/lib/python2.7/dist-packages/ceilometer/compute/virt`` with the one in the reposirtory at __compute_pollster/virt/inspector.py__
 2. Replace the __inspector.py__ in the folder ``/usr/lib/python2.7/dist-packages/ceilometer/compute/virt/libvirt`` with the one in the reposirtory at __compute_pollster/virt/libvirt/inspector.py__
 3. Replace the __memory.py__ file from the compute_pollster inside the folder ``/usr/lib/python2.7/dist-packages/ceilometer/compute/pollsters``
