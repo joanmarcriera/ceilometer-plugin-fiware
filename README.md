@@ -10,10 +10,10 @@ Some additional information about ceilometer: _it is a tool created in order to 
 
 After the installation/configuration, IOs should be able to obtain information about their Openstack installation directly from ceilometer:
 - __region__
-- __image__
+- __image__ (not needed in Kilo)
 - __host service__ _(nova, glance, cinder, ... )_
 - __host__
-- __vm__
+- __vm__ (not needed in Kilo)
 
 The installation/configuration is divided into two main parts
 - the installation procedure in the central node
@@ -38,7 +38,7 @@ netlist=net04_ext,net05_ext
 ram_allocation_ratio=1.5
 cpu_allocation_ratio=16
 ```
-Replace the values with your Openstack installation information.
+Replace the values with your Openstack installation information (where netlist is the list of the names of your external networks).
 
 2. Open this folder and copy the __region__ folder from the github repository
 ```
@@ -54,10 +54,14 @@ region.py
 ```
 region = ceilometer.region.region:RegionPollster
 ```
-4. Restart the central pollster agent
-5. Check if ceilometer is able to see the information about the region
+4. Restart the central pollster agent i.e.:
+
+ - __crm resource restart p_ceilometer-agent-central__
+ - OR __service ceilometer-central-agent restart__ (if you are not using HA)
+
+5. Check if ceilometer is able to see the information about the region (remember to replace the RegionOne with your region name):
 ```
-#ceilometer resource-list
+#ceilometer resource-list -q resource_id=RegionOne
 +-------------+-----------+---------+------------+
 | Resource ID | Source    | User ID | Project ID |
 +-------------+-----------+---------+------------+
@@ -78,6 +82,9 @@ region = ceilometer.region.region:RegionPollster
 ```
 
 #### Pollster for image
+
+__NOT NEEDED IF YOU HAVE A CEILOMETER FOR OPENSTACK KILO__
+
 The pollster for the images entity is already provided by a standard installation of ceilometer. Check if it is enabled in the configuration file:
 1. open the file: ``/usr/lib/python2.7/dist-packages/ceilometer-2015.1.1.egg-info/entry_points.txt`` check under ``[ceilometer.notification]``
 ```
@@ -112,6 +119,9 @@ compute.info = ceilometer.compute.pollsters.host:HostPollster
 ```
 
 4. Restart the compute agent and check if you are able to see the host information inside your ceilometer (pay attention to the __compute.node.cpu.percent__, this is linked to the nova configuration)
+  - __service nova-compute restart__
+  - __service ceilometer-agent-compute restart__
+
 ```
 #ceilometer meter-list | grep compute.node
 +--------------------------+-------+------+---------------------------+---------+------------+
