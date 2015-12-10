@@ -101,7 +101,7 @@ image = ceilometer.image.notifications:Image
 ```
 
 #### Pollster for host_service
-__TO DO__ -we have to understand how monasca already manage this checks!-
+__TO DO__ -we have to understand how monasca already manage these checks!-
 
 ### Compute agent pollsters
 
