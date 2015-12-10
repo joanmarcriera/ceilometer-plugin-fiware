@@ -27,6 +27,7 @@ On the first side only the main pollsters will be installed, in the second one o
 
 #### Pollster for region
 Please follow these steps:
+
 1. Open the file ``/etc/ceilometer/ceilometer.conf``, at the end of it add these rows (_with your region values_):
 ```
 [region]
@@ -49,7 +50,7 @@ ls /usr/lib/python2.7/dist-packages/ceilometer/region
 __init__.py
 region.py
 ```
-3. Edit the ceilometer configuration file ``/usr/lib/python2.7/dist-packages/ceilometer-2014.2.2.egg-info/entry_points.txt``  find the ``[ceilometer.poll.central]`` section and add this row:
+3. Edit the ceilometer configuration file ``/usr/lib/python2.7/dist-packages/ceilometer-2015.1.1.egg-info/entry_points.txt``  find the ``[ceilometer.poll.central]`` section and add this row:
 ```
 region = ceilometer.region.region:RegionPollster
 ```
@@ -78,7 +79,7 @@ region = ceilometer.region.region:RegionPollster
 
 #### Pollster for image
 The pollster for the images entity is already provided by a standard installation of ceilometer. Check if it is enabled in the configuration file:
-1. open the file: ``/usr/lib/python2.7/dist-packages/ceilometer-2014.2.2.egg-info/entry_points.txt`` check under ``[ceilometer.notification]``
+1. open the file: ``/usr/lib/python2.7/dist-packages/ceilometer-2015.1.1.egg-info/entry_points.txt`` check under ``[ceilometer.notification]``
 ```
 image = ceilometer.image.notifications:Image
 ```
@@ -104,7 +105,7 @@ compute_monitors = ComputeDriverCPUMonitor
 notification_driver = messagingv2
 ```
 2. Copy the __host.py__ file from the compute_pollster folder into this folder ``/usr/lib/python2.7/dist-packages/ceilometer/compute/pollsters``
-3. enable the pollster by adding the following row inside the file ``/usr/lib/python2.7/dist-packages/ceilometer-2014.2.2.egg-info/entry_points.txt
+3. enable the pollster by adding the following row inside the file ``/usr/lib/python2.7/dist-packages/ceilometer-2015.1.1.egg-info/entry_points.txt
 `` and under the section ``[ceilometer.poll.compute]`` :
 ```
 compute.info = ceilometer.compute.pollsters.host:HostPollster
@@ -136,7 +137,7 @@ __NOT NEEDED IF YOU HAVE A CEILOMETER FOR OPENSTACK KILO__
 2. Replace the __inspector.py__ in the folder ``/usr/lib/python2.7/dist-packages/ceilometer/compute/virt/libvirt`` with the one in the reposirtory at __compute_pollster/virt/libvirt/inspector.py__
 3. Replace the __memory.py__ file from the compute_pollster inside the folder ``/usr/lib/python2.7/dist-packages/ceilometer/compute/pollsters``
 4. Replace the __disk.py__ file from the compute pollster inside the same folder ``/usr/lib/python2.7/dist-packages/ceilometer/compute/pollsters``
-5. enable the pollsters by adding the following rows inside the file ``/usr/lib/python2.7/dist-packages/ceilometer-2014.2.2.egg-info/entry_points.txt
+5. enable the pollsters by adding the following rows inside the file ``/usr/lib/python2.7/dist-packages/ceilometer-2015.1.1.egg-info/entry_points.txt
 `` and under the section ``[ceilometer.poll.compute]``
 ```
 memory.usage = ceilometer.compute.pollsters.memory:MemoryUsagePollster
