@@ -57,7 +57,7 @@ region = ceilometer.region.region:RegionPollster
 4. Restart the central pollster agent i.e.:
 
  - __crm resource restart p_ceilometer-agent-central__
- - OR __service ceilometer-central-agent restart__ (if you are not using HA)
+ - OR __service ceilometer-agent-central restart__ (if you are not using HA)
 
 5. Check if ceilometer is able to see the information about the region (remember to replace the RegionOne with your region name):
 ```
