@@ -65,47 +65,47 @@ class RegionPollster(_Base):
 
         #compute the size of the pool
         if nL and "networks" in nL:
-            for nLi in nL['networks']:
-                if (("id" in nLi) and ("name" in nLi) and nLi['name'] in cfg.CONF.region.netlist and  ("subnets" in nLi)):
+            for nLi in nL["networks"]:
+                if (("id" in nLi) and ("name" in nLi) and nLi["name"] in cfg.CONF.region.netlist and  ("subnets" in nLi)):
                     for sNi in nLi['subnets']:
                         sN=neutron.show_subnet(sNi)
-                        if (("subnet" in sN) and ("cidr" in sN['subnet']) and ( "allocation_pools" in sN['subnet'] )):
+                        if (("subnet" in sN) and ("cidr" in sN["subnet"]) and ( "allocation_pools" in sN["subnet"] )):
                             subNetId.append(sN['subnet']['id'])
                             if sN["subnet"]["allocation_pools"] and len(sN["subnet"]["allocation_pools"]) > 0:
-                                for pool in sN['subnet']['allocation_pools']:
+                                for pool in sN["subnet"]["allocation_pools"]:
                                     subNet.append(IPRange(pool["start"], pool["end"]))
                                     pool_size +=len(IPRange(pool["start"], pool["end"]))
 
         #compute the IP usage
         netF=neutron.list_floatingips()
-        if netF and 'floatingips' in netF:
-            for netFi in netF['floatingips']:
+        if netF and "floatingips" in netF:
+            for netFi in netF["floatingips"]:
                 for tmp_pool in subNet:
-                    if 'floating_ip_address' in netFi and IPAddress(netFi['floating_ip_address']) in tmp_pool:
+                    if "floating_ip_address" in netFi and IPAddress(netFi["floating_ip_address"]) in tmp_pool:
                         alloc_ip+=1
-                        if 'fixed_ip_address' in netFi and netFi['fixed_ip_address']:
+                        if "fixed_ip_address" in netFi and netFi["fixed_ip_address"]:
                             used_ip+=1;
                             break;
                         break;
 
         #check if some routers are using IPs
         r_L=neutron.list_routers()
-        if 'routers' in r_L:
-            for r_li in r_L['routers']:
-                if "external_gateway_info" in r_li  and r_li["external_gateway_info"]  and 'external_fixed_ips' in r_li["external_gateway_info"] and len(r_li["external_gateway_info"]['external_fixed_ips'])>0:
-                    for tmp_r_id in r_li ["external_gateway_info"]  ['external_fixed_ips']:
-                        if 'subnet_id' in tmp_r_id and tmp_r_id['subnet_id'] in subNetId:
+        if "routers" in r_L:
+            for r_li in r_L["routers"]:
+                if "external_gateway_info" in r_li  and r_li["external_gateway_info"]  and "external_fixed_ips" in r_li["external_gateway_info"] and len(r_li["external_gateway_info"]["external_fixed_ips"])>0:
+                    for tmp_r_id in r_li ["external_gateway_info"]  ["external_fixed_ips"]:
+                        if "subnet_id" in tmp_r_id and tmp_r_id["subnet_id"] in subNetId:
                             alloc_ip+=1;
                             used_ip+=1;
 
         #create region Object
         #build metadata
-        metaD['name']                = (cfg.CONF.service_credentials.os_region_name if cfg.CONF.service_credentials.os_region_name else None)
-        metaD['latitude']            = (cfg.CONF.region.latitude if cfg.CONF.region.latitude else 0.0)
-        metaD['longitude']           = (cfg.CONF.region.longitude if cfg.CONF.region.longitude else 0.0)
-        metaD['location']            = (cfg.CONF.region.location if cfg.CONF.region.location else None)
-        metaD['ram_allocation_ratio']= (cfg.CONF.region.ram_allocation_ratio if cfg.CONF.region.ram_allocation_ratio else None)
-        metaD['cpu_allocation_ratio']= (cfg.CONF.region.cpu_allocation_ratio if cfg.CONF.region.cpu_allocation_ratio else None)
+        metaD["name"]                = (cfg.CONF.service_credentials.os_region_name if cfg.CONF.service_credentials.os_region_name else None)
+        metaD["latitude"]            = (cfg.CONF.region.latitude if cfg.CONF.region.latitude else 0.0)
+        metaD["longitude"]           = (cfg.CONF.region.longitude if cfg.CONF.region.longitude else 0.0)
+        metaD["location"]            = (cfg.CONF.region.location if cfg.CONF.region.location else None)
+        metaD["ram_allocation_ratio"]= (cfg.CONF.region.ram_allocation_ratio if cfg.CONF.region.ram_allocation_ratio else None)
+        metaD["cpu_allocation_ratio"]= (cfg.CONF.region.cpu_allocation_ratio if cfg.CONF.region.cpu_allocation_ratio else None)
 
         #build samples
         regionArray.append({ 'name':'region.pool_ip','unit':'#','value':(pool_size if pool_size else 0)})
