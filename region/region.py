@@ -20,7 +20,7 @@ import itertools
 
 from oslo.config import cfg
 from oslo.utils import timeutils
-
+from ceilometer.openstack.common import log
 from ceilometer.agent import plugin_base
 from ceilometer import sample
 from neutronclient.v2_0 import client as clientN
@@ -92,7 +92,7 @@ class RegionPollster(_Base):
         r_L=neutron.list_routers()
         if 'routers' in r_L:
             for r_li in r_L['routers']:
-                if "external_gateway_info" in r_li and 'external_fixed_ips' in r_li["external_gateway_info"] and len(r_li["external_gateway_info"]['external_fixed_ips'])>0:
+                if "external_gateway_info" in r_li  and r_li["external_gateway_info"]  and 'external_fixed_ips' in r_li["external_gateway_info"] and len(r_li["external_gateway_info"]['external_fixed_ips'])>0:
                     for tmp_r_id in r_li ["external_gateway_info"]  ['external_fixed_ips']:
                         if 'subnet_id' in tmp_r_id and tmp_r_id['subnet_id'] in subNetId:
                             alloc_ip+=1;
