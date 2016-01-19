@@ -43,8 +43,8 @@ class HostPollster(pollsters.BaseComputePollster):
 
         LOG.debug(_('checking host %s'), cfg.CONF.host)
         try:
-            hostInfo=nt.hosts.get(cfg.CONF.host);
-            hostArray=[]
+            hostInfo = nt.hosts.get(cfg.CONF.host)
+            hostArray = []
             if len(hostInfo)>=3:
                 #total
                 hostArray.append({ 'name':'ram.tot','unit':'MB','value':(hostInfo[0].memory_mb if hostInfo[0].memory_mb else 0)})
