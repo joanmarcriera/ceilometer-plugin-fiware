@@ -1,13 +1,18 @@
-# The new FIWARE monitoring system
+# FIWARE Lab monitoring system (based on Ceilometer and Monasca)
 
 ## Description
 
-This repository contains all the pollsters and the additional customization that Infrastructure Owners (IOs) have to perform. IOs have to customize the standard [ceilometer](https://wiki.openstack.org/wiki/Ceilometer) installation, by adding some pollsters or by editing the configuration file.
+### Architecture
+The following figure describes the high level architecture of the monitoring system.
+
+
+
+This github repository contains all the pollsters and the additional customization that Infrastructure Owners (IOs) have to perform. IOs have to customize the standard [ceilometer](https://wiki.openstack.org/wiki/Ceilometer) installation, by adding some pollsters or by editing the configuration file.
 
 Some additional information about ceilometer: _it is a tool created in order to handle the Telemetry requirements of an OpenStack environment (this includes use cases such as metering, monitoring, and alarming to name a few)_
 
 <img src="http://docs.openstack.org/developer/ceilometer/_images/ceilo-arch.png">
-Figure taken from http://docs.openstack.org/developer/ceilometer/architecture.html
+_Figure taken from [ceilometer documentation](http://docs.openstack.org/developer/ceilometer/architecture.html)_
 
 After the installation/configuration, IOs should be able to obtain information about their Openstack installation directly from ceilometer:
 - __region__
