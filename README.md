@@ -2,10 +2,13 @@
 
 ## Description
 
-### Architecture
 The following figure describes the high level architecture of the monitoring system.
 
 
+<PUT FIGURE HERE>
+
+Data is collected through ceilometer (where customized pollster have been developed) from each node. Relevant data is sent to Monasca on the master node. Data is stored and eventually passed to the FIWARE Big Data GE (Cosmos) for aggregation and analysis.
+Sanity Check tool also send data to Monasca. Finally Infographic (but also other clients) retrieve the data through Monasca.
 
 This github repository contains all the pollsters and the additional customization that Infrastructure Owners (IOs) have to perform. IOs have to customize the standard [ceilometer](https://wiki.openstack.org/wiki/Ceilometer) installation, by adding some pollsters or by editing the configuration file.
 
