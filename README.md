@@ -12,7 +12,7 @@ Sanity Check tool also send data to Monasca. Finally Infographic (but also other
 
 This github repository contains all the pollsters and the additional customization that Infrastructure Owners (IOs) have to perform. IOs have to customize the standard [ceilometer](https://wiki.openstack.org/wiki/Ceilometer) installation, by adding some pollsters or by editing the configuration file.
 
-Some additional information about ceilometer: _it is a tool created in order to handle the Telemetry requirements of an OpenStack environment (this includes use cases such as metering, monitoring, and alarming to name a few)_
+Some additional information about ceilometer: _it is a tool created in order to handle the Telemetry requirements of an OpenStack environment (this includes use cases such as metering, monitoring, and alarming to name a few)_.
 
 <img src="http://docs.openstack.org/developer/ceilometer/_images/ceilo-arch.png">
 _Figure taken from [ceilometer documentation](http://docs.openstack.org/developer/ceilometer/architecture.html)_
