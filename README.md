@@ -4,8 +4,7 @@
 
 The following figure describes the high level architecture of the monitoring system.
 
-
-PUT FIGURE HERE
+<img src="https://github.com/SmartInfrastructures/ceilometer-plugin-fiware/blob/master/img/FIWARE_Monitoring_Arch.png">
 
 Data is collected through ceilometer (where customized pollster have been developed) from each node. Relevant data is sent to Monasca on the master node. Data is stored and eventually passed to the FIWARE Big Data GE (Cosmos) for aggregation and analysis.
 Sanity Check tool also send data to Monasca. Finally Infographic (but also other clients) retrieve the data through Monasca.
