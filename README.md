@@ -275,10 +275,23 @@ in the Controller:
       ...
    ```
 
-3. Check that all OpenStack services (nova, cinder, etc.) to be monitored are included in the configuration file
+3. Please check Keystone URL and credentials in the configuration file (Ceilometer user could be used here):
+
+   ```
+   Api:
+      ...
+      keystone_url: http://127.0.0.1:35357/v3
+      username: myuser
+      password: mypass
+      ...
+   ```
+
+   Make sure the specified user has the __monasca_user__ role added.
+
+4. Check that all OpenStack services (nova, cinder, etc.) to be monitored are included in the configuration file
    `/etc/monasca/agent/conf.d/process.yaml` used by [Process Checks plugin][monasca_agent_plugin_process_checks]
 
-4. Restart monasca-agent service:
+5. Restart monasca-agent service:
 
    ```
    # service monasca-agent restart
