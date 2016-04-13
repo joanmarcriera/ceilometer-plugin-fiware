@@ -3,7 +3,7 @@
 #
 # Author: Attilio Broglio <abroglio AT create-net DOT org>
 #
-# Version: 1.0.0
+# Version: 1.0.1
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
 # not use this file except in compliance with the License. You may obtain
@@ -64,7 +64,8 @@ class RegionPollster(_Base):
             username=cfg.CONF.service_credentials.os_username,
             password=cfg.CONF.service_credentials.os_password,
             tenant_name=cfg.CONF.service_credentials.os_tenant_name,
-            auth_url=cfg.CONF.service_credentials.os_auth_url
+            auth_url=cfg.CONF.service_credentials.os_auth_url,
+            region_name=cfg.CONF.service_credentials.os_region_name
         )
 
         # initialize some variables:
