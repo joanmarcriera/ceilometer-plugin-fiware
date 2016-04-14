@@ -257,16 +257,21 @@ __NOT NEEDED IF YOU HAVE A CEILOMETER FOR OPENSTACK KILO__
 
 #### Monasca Agent
 
-In order to monitor the OpenStack services (i.e. __host services__), [monasca-agent][monasca_agent] should be installed
-in the Controller:
+In order to monitor the OpenStack services (i.e. __host services__), [monasca-agent][monasca_agent_doc] should be
+installed in the Controller:
 
-1. Download sources from [GitHub repository][monasca_agent] and install the package:
+1. Locate the [latest release][monasca_agent_releases] of the component and use `pip` tool to install it:
 
    ```
-   # python setup.py install
+   # VERSION=1.1.21-FIWARE
+   # PBR_VERSION=$VERSION pip install git+https://github.com/telefonicaid/monasca-agent.git@tags/$VERSION
    ```
 
-2. Edit configuration file `/etc/monasca/agent/agent.yaml` to add the URL of Monasca API:
+2. Configure the component following directions described in the [documentation][monasca_agent_configuration]. Note
+   that you will have to provide valid Keystone credentials, usually those of the Ceilometer service (which should have
+   previously been assigned the *monasca_user* role).
+
+3. Edit configuration file `/etc/monasca/agent/agent.yaml` to add the URL of Monasca API:
 
    ```
    Api:
@@ -274,19 +279,6 @@ in the Controller:
       monasca_url: http://127.0.0.1:8070/v2.0
       ...
    ```
-
-3. Please check Keystone URL and credentials in the configuration file (Ceilometer user could be used here):
-
-   ```
-   Api:
-      ...
-      keystone_url: http://127.0.0.1:35357/v3
-      username: myuser
-      password: mypass
-      ...
-   ```
-
-   Make sure the specified user has the __monasca_user__ role added.
 
 4. Check that all OpenStack services (nova, cinder, etc.) to be monitored are included in the configuration file
    `/etc/monasca/agent/conf.d/process.yaml` used by [Process Checks plugin][monasca_agent_plugin_process_checks]
@@ -376,13 +368,21 @@ https://wiki.openstack.org/wiki/Telemetry
 https://wiki.openstack.org/wiki/Monasca
 "Monasca Documentation"
 
-[monasca_agent]:
-https://github.com/telefonicaid/monasca-agent/tree/fiware
+[monasca_agent_doc]:
+https://github.com/telefonicaid/monasca-agent/blob/fiware/README.md
 "Monasca Agent"
+
+[monasca_agent_configuration]:
+https://github.com/telefonicaid/monasca-agent/blob/fiware/docs/Agent.md#configuring
+"Monasca Agent Configuration"
 
 [monasca_agent_plugin_process_checks]:
 https://github.com/telefonicaid/monasca-agent/blob/fiware/docs/Plugins.md#process-checks
 "Monasca Agent Standard Plugins - Process Checks"
+
+[monasca_agent_releases]:
+https://github.com/telefonicaid/monasca-agent/releases
+"Monasca Agent Releases"
 
 [monasca_ceilometer]:
 https://github.com/telefonicaid/monasca-ceilometer/tree/fiware
