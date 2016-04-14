@@ -271,7 +271,7 @@ installed in the Controller:
    that you will have to provide valid Keystone credentials, usually those of the Ceilometer service (which should have
    previously been assigned the *monasca_user* role).
 
-3. Edit configuration file `/etc/monasca/agent/agent.yaml` to add the URL of Monasca API:
+3. Edit configuration file `/etc/monasca/agent/agent.yaml` to add the URL of Monasca API (*use Master Node endpoint*):
 
    ```
    Api:
@@ -300,8 +300,8 @@ the OpenStack controller:
    # pip install python-monascaclient==1.0.27
    ```
 
-2. Copy the following files from [Ceilosca package of Monasca-Ceilometer][monasca_ceilometer] into the Ceilometer
-   package at `/usr/lib/python2.7/dist-packages/ceilometer`:
+2. Copy the following files from *Ceilosca* component (included in the [latest release][monasca_ceilometer_releases]
+   of Monasca-Ceilometer) into the Ceilometer package at `/usr/lib/python2.7/dist-packages/ceilometer`:
 
    ```
    monasca-ceilometer/ceilosca/ceilometer/monasca_client.py
@@ -310,6 +310,14 @@ the OpenStack controller:
    monasca-ceilometer/ceilosca/ceilometer/publisher/monasca_data_filter.py
    monasca-ceilometer/ceilosca/ceilometer/publisher/monasca_metric_filter.py
    monasca-ceilometer/ceilosca/ceilometer/publisher/monclient.py
+   ```
+
+   Additionally, please create a text file at `/usr/lib/python2.7/dist-packages/ceilometer-2015.1.2.egg-info` to record
+   the exact version of Ceilosca being manually installed:
+
+   ```
+   # VERSION=2015.1-FIWARE
+   # echo version=$VERSION > /usr/lib/python2.7/dist-packages/ceilometer-2015.1.2.egg-info/ceilosca.txt
    ```
 
 3. Edit `/usr/lib/python2.7/dist-packages/ceilometer-2015.1.2.egg-info/entry_points.txt` to add the following entries:
@@ -328,7 +336,8 @@ the OpenStack controller:
    __meter_sink__ needed to send to Monasca a subset of metrics gathered by Ceilometer. Please refer to sample file at
    `monasca-ceilometer/etc/ceilometer/pipeline.yaml` from [Monasca-Ceilometer][monasca_ceilometer]
 
-5. Modify `/etc/ceilometer/ceilometer.conf` to configure a new meter storage driver for Ceilometer:
+5. Modify `/etc/ceilometer/ceilometer.conf` to configure a new meter storage driver for Ceilometer (*substitute with the
+   endpoint of Master Node*):
 
    ```
    metering_connection = monasca://http://127.0.0.1:8070/v2.0
@@ -387,6 +396,10 @@ https://github.com/telefonicaid/monasca-agent/releases
 [monasca_ceilometer]:
 https://github.com/telefonicaid/monasca-ceilometer/tree/fiware
 "Python plugin and storage driver for Ceilometer to send samples to Monasca"
+
+[monasca_ceilometer_releases]:
+https://github.com/telefonicaid/monasca-ceilometer/releases
+"Releases of Python plugin and storage driver for Ceilometer to send samples to Monasca"
 
 [cosmos]:
 https://github.com/Fiware/context.Cosmos/blob/master/README.md
