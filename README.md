@@ -66,8 +66,9 @@ Please follow these steps:
    <class 'ceilometer.region.region.RegionPollster'>
    ```
 
-3. Edit Ceilometer entry points file (`/usr/lib/python2.7/dist-packages/ceilometer-2015.1.2.egg-info/entry_points.txt`)
-   to add the new pollster at the `[ceilometer.poll.central]` section:
+3. Edit entry points file of your installed version of Ceilometer (i.e., for version 2015.1.2 should be located at path
+   `/usr/lib/python2.7/dist-packages/ceilometer-2015.1.2.egg-info/entry_points.txt`) and please add the new pollster at
+   the `[ceilometer.poll.central]` section:
 
    ```
    region = ceilometer.region.region:RegionPollster
@@ -260,18 +261,25 @@ __NOT NEEDED IF YOU HAVE A CEILOMETER FOR OPENSTACK KILO__
 In order to monitor the OpenStack services (i.e. __host services__), [monasca-agent][monasca_agent_doc] should be
 installed in the Controller:
 
-1. Locate the [latest release][monasca_agent_releases] of the component and use `pip` tool to install it:
+1. Please upgrade your versions of `setuptools` and `pip`:
+
+   ```
+   # pip install --upgrade setuptools
+   # pip install --upgrade pip
+   ```
+
+2. Locate the [latest release][monasca_agent_releases] of the component and use `pip` tool to install it:
 
    ```
    # VERSION=1.1.21-FIWARE
    # PBR_VERSION=$VERSION pip install git+https://github.com/telefonicaid/monasca-agent.git@tags/$VERSION
    ```
 
-2. Configure the component following directions described in the [documentation][monasca_agent_configuration]. Note
+3. Configure the component following directions described in the [documentation][monasca_agent_configuration]. Note
    that you will have to provide valid Keystone credentials, usually those of the Ceilometer service (which should have
    previously been assigned the *monasca_user* role).
 
-3. Edit configuration file `/etc/monasca/agent/agent.yaml` to add the URL of Monasca API (*use Master Node endpoint*):
+4. Edit configuration file `/etc/monasca/agent/agent.yaml` to add the URL of Monasca API (*use Master Node endpoint*):
 
    ```
    Api:
@@ -280,10 +288,10 @@ installed in the Controller:
       ...
    ```
 
-4. Check that all OpenStack services (nova, cinder, etc.) to be monitored are included in the configuration file
+5. Check that all OpenStack services (nova, cinder, etc.) to be monitored are included in the configuration file
    `/etc/monasca/agent/conf.d/process.yaml` used by [Process Checks plugin][monasca_agent_plugin_process_checks]
 
-5. Restart monasca-agent service:
+6. Restart monasca-agent service:
 
    ```
    # service monasca-agent restart
