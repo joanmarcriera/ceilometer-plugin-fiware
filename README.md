@@ -272,7 +272,7 @@ installed in the Controller:
 
    ```
    # VERSION=1.1.21-FIWARE
-   # PBR_VERSION=$VERSION pip install git+https://github.com/telefonicaid/monasca-agent.git@tags/$VERSION
+   # PBR_VERSION=$VERSION pip install git+https://github.com/telefonicaid/monasca-agent.git@$VERSION
    ```
 
 3. Configure the component following directions described in the [documentation][monasca_agent_configuration]. Note
