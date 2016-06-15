@@ -239,7 +239,6 @@ METRICS_FOR_HOST_SERVICES="\
 # Timestamps
 NOW=$(date +%s)
 SOME_TIME_AGO=$((NOW - $MEASURE_TIME * 60))
-SOME_TIME_AGO_DESC="an hour ago"
 
 # Recent measurements period
 printf_warn "Considering measurements within last $MEASURE_TIME minutes"
