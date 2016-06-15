@@ -34,7 +34,7 @@ of their Openstack environments at Infographics page or by querying Federation M
 
 ## Installation
 
-The installation and configuration procedure involves both the central node (i.e. Controller) and the compute nodes.
+The installation and configuration procedure involves both the central nodes (i.e. controllers) and the compute nodes.
 
 ### Central agent pollsters
 
@@ -76,7 +76,7 @@ Please follow these steps:
 
 4. Restart Ceilometer Central Agent:
 
-   If using HA:
+   If using Fuel HA:
    ```
    # crm resource restart p_ceilometer-agent-central
    ```
@@ -163,9 +163,12 @@ entry points:
    compute.info = ceilometer.compute.pollsters.host:HostPollster
    ```
 
-4. Restart Ceilometer Compute Agent and check if you are able to retrieve the host information from Ceilometer (pay
-   attention to the __compute.node.cpu.percent__, which is linked to the Nova configuration, and please note that the
-   resource_id is the concatenation \<_host_\>\_\<_nodename_\>, values which are usually the same)
+4. Please check the polling frequency defined by `interval` parameter at `/etc/ceilometer/pipeline.yaml`. Its default
+   value is 60 seconds: you may consider lowering the polling rate.
+
+5. Restart both Nova Compute and Ceilometer Compute Agent, and check if you are able to retrieve the host information
+   from Ceilometer (pay attention to the __compute.node.cpu.percent__, which is linked to the Nova configuration, and
+   please note that the resource_id is the concatenation \<_host_\>\_\<_nodename_\>, values which are usually the same)
 
    ```
    # service nova-compute restart
@@ -177,9 +180,9 @@ entry points:
    +--------------------------+-------+------+---------------------------+---------+------------+
    | Name                     | Type  | Unit | Resource ID               | User ID | Project ID |
    +--------------------------+-------+------+---------------------------+---------+------------+
+   | compute.node.cpu.percent | gauge | %    | node-2.aa.bb_node-2.aa.bb | None    | None       |
    | compute.node.cpu.max     | gauge | cpu  | node-2.aa.bb_node-2.aa.bb | None    | None       |
    | compute.node.cpu.now     | gauge | cpu  | node-2.aa.bb_node-2.aa.bb | None    | None       |
-   | compute.node.cpu.percent | gauge | %    | node-2.aa.bb_node-2.aa.bb | None    | None       |
    | compute.node.cpu.tot     | gauge | cpu  | node-2.aa.bb_node-2.aa.bb | None    | None       |
    | compute.node.disk.max    | gauge | GB   | node-2.aa.bb_node-2.aa.bb | None    | None       |
    | compute.node.disk.now    | gauge | GB   | node-2.aa.bb_node-2.aa.bb | None    | None       |
@@ -259,39 +262,72 @@ __NOT NEEDED IF YOU HAVE A CEILOMETER FOR OPENSTACK KILO__
 #### Monasca Agent
 
 In order to monitor the OpenStack services (i.e. __host services__), [monasca-agent][monasca_agent_doc] should be
-installed in the Controller:
+installed in the controllers:
 
-1. Please upgrade your versions of `setuptools` and `pip`:
-
-   ```
-   # pip install --upgrade setuptools
-   # pip install --upgrade pip
-   ```
-
-2. Locate the [latest release][monasca_agent_releases] of the component and use `pip` tool to install it:
+1. Create a Python virtualenv "monasca" located at `/opt/monasca`:
 
    ```
-   # VERSION=1.1.21-FIWARE
-   # PBR_VERSION=$VERSION pip install git+https://github.com/telefonicaid/monasca-agent.git@$VERSION
+   # cd /opt
+   # virtualenv monasca
+   # source monasca/bin/activate
    ```
 
-3. Configure the component following directions described in the [documentation][monasca_agent_configuration]. Note
-   that you will have to provide valid Keystone credentials, usually those of the Ceilometer service (which should have
-   previously been assigned the *monasca_user* role).
-
-4. Edit configuration file `/etc/monasca/agent/agent.yaml` to add the URL of Monasca API (*use Master Node endpoint*):
+2. Please upgrade your versions of `setuptools` and `pip`:
 
    ```
-   Api:
-      ...
-      monasca_url: http://127.0.0.1:8070/v2.0
-      ...
+   (monasca)# pip install --upgrade setuptools
+   (monasca)# pip install --upgrade pip
    ```
 
-5. Check that all OpenStack services (nova, cinder, etc.) to be monitored are included in the configuration file
-   `/etc/monasca/agent/conf.d/process.yaml` used by [Process Checks plugin][monasca_agent_plugin_process_checks]
+3. Locate the [latest release][monasca_agent_releases] of Monasca Agent component and use `pip` tool to install it:
 
-6. Restart monasca-agent service:
+   ```
+   (monasca)# VERSION=1.1.21-FIWARE
+   (monasca)# PBR_VERSION=$VERSION pip install git+https://github.com/telefonicaid/monasca-agent.git@$VERSION
+   ```
+
+4. Configure the component using `monasca-setup` (as described in the [documentation][monasca_agent_configuration]).
+   Note that you will have to provide:
+
+   * Your region name
+   * The address or domain name of Monasca API
+   * Valid Keystone credentials, usually those of the Ceilometer service (which should have previously been assigned
+     the *monasca_user* role)
+
+   ```
+   (monasca)# monasca-setup \
+     --username=YOUR_CEILOMETER_USER \
+     --password=THE_PASSWORD \
+     --project_name=service \
+     --keystone_url=http://cloud.lab.fiware.org:4731/v3 \
+     --monasca_url=http://MONASCA_API:8070/v2.0 \
+     --dimensions=region:YOUR_REGION
+   ```
+
+5. Only the file `process.yaml` used by [Process Checks plugin][monasca_agent_plugin_process_checks] is required at
+   `/etc/monasca/agent/conf.d/`. Please ensure it is configured to monitor all Openstack services (this should be the
+   case without any modifications, but it is appropriate to check that all of your services are monitored). The example
+   below shows configuration information for one service (nova-scheduler):
+
+   ```
+   - built_by: Nova
+     detailed: false
+     dimensions:
+       component: nova-scheduler
+       service: compute
+     exact_match: false
+     name: nova-scheduler
+     search_string:
+     - nova-scheduler
+   ```
+
+6. Please verify the configuration is correct:
+
+   ```
+   # service monasca-agent configtest
+   ```
+
+7. Finally, restart the agent:
 
    ```
    # service monasca-agent restart
@@ -309,7 +345,8 @@ the OpenStack controller:
    ```
 
 2. Copy the following files from *Ceilosca* component (included in the [latest release][monasca_ceilometer_releases]
-   of Monasca-Ceilometer) into the Ceilometer package at `/usr/lib/python2.7/dist-packages/ceilometer`:
+   of [Monasca-Ceilometer][monasca_ceilometer]) into the Ceilometer package at your Python installation directory
+   (usually `/usr/lib/python2.7/dist-packages/ceilometer`):
 
    ```
    monasca-ceilometer/ceilosca/ceilometer/monasca_client.py
@@ -340,28 +377,59 @@ the OpenStack controller:
    monasca = ceilometer.storage.impl_monasca_filtered:Connection
    ```
 
-4. Edit configuration file `/etc/ceilometer/pipeline.yaml` to include the definitions of elements __meter_source__ and
-   __meter_sink__ needed to send to Monasca a subset of metrics gathered by Ceilometer. Please refer to sample file at
-   `monasca-ceilometer/etc/ceilometer/pipeline.yaml` from [Monasca-Ceilometer][monasca_ceilometer]
+4. Copy the following configuration files from Monasca-Ceilometer repository into `/etc/ceilometer`:
+
+   ```
+   monasca-ceilometer/etc/ceilometer/pipeline.yaml
+   monasca-ceilometer/etc/ceilometer/monasca_field_definitions.yaml
+   ```
+
+   Please ensure elements __meter_source__ and  __meter_sink__ are set up to send to Monasca the subset of Ceilometer
+   metrics required by FIWARE Monitoring.
 
 5. Modify `/etc/ceilometer/ceilometer.conf` to configure a new meter storage driver for Ceilometer (*substitute with the
    endpoint of Master Node*):
 
    ```
-   metering_connection = monasca://http://127.0.0.1:8070/v2.0
+   metering_connection = monasca://http://MONASCA_API:8070/v2.0
    ```
 
    Please make sure the user specified under `[service_credentials]` section of the same file has __monasca_user__
    role added.
 
-6. Copy `monasca-ceilometer/etc/ceilometer/monasca_field_definitions.yaml` from [Monasca-Ceilometer][monasca_ceilometer]
-   into `/etc/ceilometer` folder
-
 7. Restart all Ceilometer services:
 
+   If using Fuel HA:
+   ```
+   # crm resource restart p_ceilometer-agent-central
+   # crm resource restart p_ceilometer-alarm-evaluator
+   # service ceilometer-agent-notification restart
+   # service ceilometer-collector restart
+   # service ceilometer-api restart
+   # service ceilometer-alarm-notifier restart
+   ```
+   Otherwise:
    ```
    # CEILOMETER_SERVICES=$(cd /etc/init.d; ls -1 ceilometer*)
    # for NAME in $CEILOMETER_SERVICES; do service $NAME restart; done
+   ```
+
+
+## Verification
+
+In order to verify whether the installation and configuration of FIWARE Monitoring have been successful, we provide the
+[fiware-check-monitoring.sh](/tools/fiware-check-monitoring.sh) script available at [tools](/tools) folder. It performs
+a set of checks, not only in the controller itself but also in the compute nodes, and shows results in a human-readable
+manner.
+
+Running the script with no additional parameters may suffice in most of the cases, but some adjustments could be done
+with command line options. It only requires defining the standard OpenStack environment variables with the credentials
+needed to run `nova` and other commands.
+
+For full information about the usage and options, please type:
+
+   ```
+   # fiware-check-monitoring.sh --help
    ```
 
 
