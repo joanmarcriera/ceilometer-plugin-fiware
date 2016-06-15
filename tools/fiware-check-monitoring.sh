@@ -20,14 +20,17 @@
 # Perform several checks to verify FIWARE Monitoring configuration
 #
 # Usage:
-#   $0 [--verbose] [--region=NAME] [--poll-threshold=SECS]
 #   $0 --help
+#   $0 [--verbose] [--region=NAME] [--poll-threshold=SECS] [--measure-time=MINS]
+#   __ [--ssh-key=FILE]
 #
 # Options:
-#   -v, --verbose		show verbose messages
-#   -r, --region=NAME		region name (if not given, taken from nova.conf)
-#   -p, --poll-threshold=SECS	threshold for polling frequency (in seconds)
-#   -h, --help			show this help message and exit
+#   -h, --help 			show this help message and exit
+#   -v, --verbose 		show verbose messages
+#   -r, --region=NAME 		region name (if not given, taken from nova.conf)
+#   -p, --poll-threshold=SECS 	threshold warning polling frequency (seconds)
+#   -m, --measure-time=MINS 	period to query measurements up to now (minutes)
+#   -k, --ssh-key=FILE 		private key to access compute nodes
 #
 # Environment:
 #   OS_AUTH_URL			default value for nova --os-auth-url
@@ -40,23 +43,43 @@
 #   OS_PROJECT_DOMAIN_NAME	default value for nova --os-project-domain-name
 #
 
-OPTS='v(verbose)r(region):p(poll-threshold):h(help)'
+OPTS='h(help)v(verbose)r(region):p(poll-threshold):m(measure-time):k(ssh-key):'
 PROG=$(basename $0)
 
+# Files
+TEMP_FILE=/tmp/$PROG
+NOVA_CONF=/etc/nova/nova.conf
+PIPELINE_CONF=/etc/ceilometer/pipeline.yaml
+MONASCA_AGENT_CONF=/etc/monasca/agent/agent.yaml
+CENTRAL_AGENT_LOG=/var/log/ceilometer/ceilometer-agent-central.log
+COMPUTE_AGENT_LOG=/var/log/ceilometer/ceilometer-agent-compute.log
+
+# Common definitions
+MONASCA_URL=
+MONASCA_USERNAME=
+MONASCA_PASSWORD=
+MONASCA_AGENT_HOME=
+alias trim='tr -d \ '
+
 # Command line options defaults
-REGION=$(awk -F= '/^region_name/ {print $2}' /etc/nova/nova.conf 2>NUL)
+REGION=$(awk -F= '/^(os_)?region_name/ {print $2}' $NOVA_CONF | trim)
 POLL_THRESHOLD=300
+MEASURE_TIME=60
+SSH_KEY=
 VERBOSE=
 
 # Command line processing
 OPTERR=
-OPTSTR=$(echo :-:$OPTS | sed 's/([a-zA-Z0-9]*)//g')
-OPTHLP=$(sed -n '20,/^$/ { s/$0/'$PROG'/; s/^#[ ]\?//p }' $0)
+OPTSTR=$(echo :-:$OPTS | sed 's/([-_a-zA-Z0-9]*)//g')
+OPTHLP=$(awk '/^# *__/ { $2=sprintf("  %*s",'${#PROG}'," ") } { print }' $0 \
+	| sed -n '20,/^$/ { s/$0/'$PROG'/; s/^#[ ]\?//; p }')
 while getopts $OPTSTR OPT; do while [ -z "$OPTERR" ]; do
 case $OPT in
 'v')	VERBOSE=true;;
 'r')	REGION=$OPTARG;;
 'p')	POLL_THRESHOLD=$OPTARG;;
+'m')	MEASURE_TIME=$OPTARG;;
+'k')	SSH_KEY=$OPTARG;;
 'h')	OPTERR="$OPTHLP";;
 '?')	OPTERR="Unknown option -$OPTARG";;
 ':')	OPTERR="Missing value for option -$OPTARG";;
@@ -74,18 +97,52 @@ esac; break; done; done
 shift $(expr $OPTIND - 1)
 [ -z "$OPTERR" -a -n "$*" ] && OPTERR="Too many arguments"
 [ -z "$OPTERR" -a -z "$REGION" ] && OPTERR="Region name is unset"
+
+# Check enviroment variables required as credentials for OpenStack clients
+COUNT=$(env | egrep 'OS_(AUTH_URL|USERNAME|PASSWORD|TENANT_NAME)' | wc -l)
+[ -z "$OPTERR" -a $COUNT -ne 4 ] && OPTERR="Missing OS_* environment variables"
+
+# Show error messages and exit
 [ -n "$OPTERR" ] && {
-	PREAMBLE=$(printf "$OPTHLP" | sed -n '0,/^Usage:/ p' | head -n -1)
-	USAGE="Usage:\n"$(printf "$OPTHLP" | sed '0,/^Usage:/ d')"\n\n"
-	TAB=4; LEN=$(echo "$USAGE" | awk -F'\t' '/ .+\t/ {print $1}' | wc -L)
-	TABSTOPS=$TAB,$(((LEN/TAB+2)*TAB)); WIDTH=${COLUMNS:-$(tput cols)}
-	[ "$OPTERR" != "$OPTHLP" ] && PREAMBLE="$OPTERR"
-	printf "$PREAMBLE\n\n" | fmt -$WIDTH 1>&2
-	printf "$USAGE" | tr -s '\t' | expand -t$TABSTOPS | fmt -$WIDTH -s 1>&2
+	PREAMBLE=$(echo "$OPTHLP" | sed -n '0,/^Usage:/ p' | head -n -1)
+	OPTIONS=$(echo "$OPTHLP" | sed -n "/^Options:/,/^\$/ p")"\n\n"
+	EPILOG=$(echo "$OPTHLP" | sed -n "/Environment:/,/^\$/ p")"\n\n"
+	USAGE=$(echo "$OPTHLP" | sed -n "/^Usage:/,/^\$/ p")
+	TAB=4; LEN=$(echo "$OPTIONS" | awk -F'\t' '/ .+\t/ {print $1}' | wc -L)
+	TABSTOPS=$TAB,$(((LEN/TAB+1)*TAB)); WIDTH=${COLUMNS:-$(tput cols)}
+	[ "$OPTERR" != "$OPTHLP" ] && PREAMBLE="$OPTERR" && OPTIONS= && EPILOG=
+	printf "$PREAMBLE\n\n$USAGE\n\n$OPTIONS" | fmt -$WIDTH -s 1>&2
+	printf "$EPILOG" | tr -s '\t' | expand -t$TABSTOPS | fmt -$WIDTH -s 1>&2
 	exit 1
 }
 
 # Common functions
+check_ssh() {
+	SSH=ssh
+	status=0
+	hosts="$*"
+	for name in $hosts; do
+		if ! $SSH $name "ls" >/dev/null 2>&1; then
+			status=1
+			break
+		fi
+	done
+	if [ $status -ne 0 ]; then
+		ssh_key_files="${SSH_KEY:-~/.ssh/fuel_id_rsa ~/.ssh/id_rsa}"
+		for name in $hosts; do
+			for file in $ssh_key_files; do
+				SSH="ssh -i $file"
+				if $SSH $name "ls" >/dev/null 2>&1; then
+					status=0
+					break
+				fi
+			done
+		done
+	fi
+	[ $status -eq 0 ] || unset SSH
+	return $status
+}
+
 get_keystone_token() {
 	response=$(curl -s -S -X POST \
 		-H "Content-Type: application/json" \
@@ -107,11 +164,12 @@ get_keystone_token() {
 
 printf_monasca_query() {
 	query="$1"
-	(curl -s -S -X GET \
-		-H "Accept: application/json" \
-		-H "X-Auth-Token: $AUTH_TOKEN" \
-		"${MONASCA_URL%/}/${query#/}" \
-		| python -mjson.tool) 2>/dev/null
+	curl="curl -s -S -X GET \
+		-H \"Accept: application/json\" \
+		-H \"X-Auth-Token: $AUTH_TOKEN\" \
+		\"${MONASCA_URL%/}/${query#/}\""
+	(eval "$curl" | python -mjson.tool) 2>/dev/null
+	[ -n "$VERBOSE" ] && echo "$curl" > $TEMP_FILE
 }
 
 printf_ok() {
@@ -123,12 +181,24 @@ printf_warn() {
 }
 
 printf_fail() {
-	tput setaf 1; printf "$*\n"; tput sgr0 #; exit 1
+	tput setaf 1; printf "$*\n"; tput sgr0
 }
 
-# Lists of metrics
+printf_curl() {
+	msg="$1"
+	tput setaf 1; printf "$msg"; awk '{$1=$1; print}' $TEMP_FILE; tput sgr0
+}
+
+# Lists of metrics (or metadata items, when appropriate)
 METRICS_FOR_IMAGES="\
 	image"
+
+METRICS_FOR_VMS="\
+	name \
+	host \
+	status \
+	image_ref \
+	instance_type"
 
 METRICS_FOR_REGIONS="\
 	region.used_ip \
@@ -148,83 +218,121 @@ METRICS_FOR_COMPUTE_NODES="\
 	compute.node.disk.max \
 	compute.node.disk.tot"
 
+METRICS_FOR_HOST_SERVICES="\
+	nova-api \
+	nova-cert \
+	nova-conductor \
+	nova-consoleauth \
+	nova-novncproxy \
+	nova-objectstore \
+	nova-scheduler \
+	neutron-dhcp-agent \
+	neutron-l3-agent \
+	neutron-metadata-agent \
+	neutron-openvswitch-agent \
+	neutron-server \
+	cinder-api \
+	cinder-scheduler \
+	glance-api \
+	glance-registry"
+
 # Timestamps
 NOW=$(date +%s)
-SOME_TIME_AGO=$((NOW - 30 * 60))
-SOME_TIME_AGO_DESC="half an hour ago"
+SOME_TIME_AGO=$((NOW - $MEASURE_TIME * 60))
+
+# Recent measurements period
+printf_warn "Considering measurements within last $MEASURE_TIME minutes"
+
+# Check Python interpreter
+printf "Check Python interpreter... "
+if [ -n "$VIRTUAL_ENV" ]; then
+	printf_fail "Python virtualenv $VIRTUAL_ENV should not be active"
+	exit 1
+else
+	printf_ok "$(python -V 2>&1) at $(which python)"
+fi
 
 # Check Monasca Agent (installation path)
 printf "Check Monasca Agent installation path... "
-for DIR in /opt/monasca/agent /monasca/monasca_agent_env; do
+for DIR in /opt/monasca /monasca/monasca_agent_env; do
 	if [ -d $DIR ]; then
 		MONASCA_AGENT_HOME=$DIR
-		printf_ok "$MONASCA_AGENT_HOME"
 		break
 	fi
 done
-[ -z "$MONASCA_AGENT_HOME" ] && printf_fail "Not found"
+if [ -z "$MONASCA_AGENT_HOME" ]; then
+	printf_fail "Not found"
+elif [ $(expr "$MONASCA_AGENT_HOME" : "^/opt/.*") -eq 0 ]; then
+	printf_warn "$MONASCA_AGENT_HOME (this path is deprecated)"
+else
+	printf_ok "$MONASCA_AGENT_HOME"
+fi
 
 # Check Monasca Agent (configuration)
 printf "Check Monasca Agent configuration... "
-for FILE in /etc/monasca/agent/agent.yaml; do
-	if [ -r $FILE ]; then
-		MONASCA_AGENT_CONF=$FILE
-		printf_ok "$MONASCA_AGENT_CONF"
-		break
-	fi
-done
-[ -z "$MONASCA_AGENT_CONF" ] && printf_fail "Not found"
+if [ ! -r $MONASCA_AGENT_CONF ]; then
+	printf_fail "Configuration file $MONASCA_AGENT_CONF not found"
+elif ! service monasca-agent configtest >/dev/null 2>&1; then
+	printf_fail "Run \`service monasca-agent configtest' to check errors"
+else
+	printf_ok "OK ($MONASCA_AGENT_CONF)"
+fi
 
 # Check Monasca Agent (region)
 printf "Check Monasca Agent configuration region... "
-MONASCA_CONF_REGION=$(awk -F': ' '/^ *region/ {print $2}' $MONASCA_AGENT_CONF)
-if [ "$MONASCA_CONF_REGION" = "$REGION" ]; then
+CONF_REGION=$(awk -F: '/^ *region/ {print $2}' $MONASCA_AGENT_CONF | trim)
+if [ "$CONF_REGION" = "$REGION" ]; then
 	printf_ok "OK"
 else
 	printf_fail "Fix 'region' value in $MONASCA_AGENT_CONF"
+	[ -n "$VERBOSE " ] && printf_fail "'$CONF_REGION' != '$REGION'"
 fi
 
 # Check Monasca Agent (hostname)
 printf "Check Monasca Agent configuration hostname... "
-MONASCA_CONF_HOST=$(awk -F': ' '/^ *hostname/ {print $2}' $MONASCA_AGENT_CONF)
-if [ -n "$MONASCA_CONF_HOST" ]; then
-	printf_ok "$MONASCA_CONF_HOST"
+CONF_HOST=$(awk -F: '/^ *hostname/ {print $2}' $MONASCA_AGENT_CONF | trim)
+if [ -n "$CONF_HOST" ]; then
+	printf_ok "$CONF_HOST"
 else
 	printf_fail "Set 'hostname' value in $MONASCA_AGENT_CONF"
 fi
 
 # Check Monasca Agent (logfile)
 printf "Check Monasca Agent logfile... "
-MONASCA_LOG=$(awk -F': ' '/^ *collector_log/ {print $2}' $MONASCA_AGENT_CONF)
-if [ -n "$MONASCA_LOG" ]; then
-	printf_ok "$MONASCA_LOG"
+FILE=$(awk -F: '/^ *forwarder_log/ {print $2}' $MONASCA_AGENT_CONF | trim)
+if [ -n "$FILE" ]; then
+	MONASCA_AGENT_LOG="$FILE"
+	printf_ok "$MONASCA_AGENT_LOG"
 else
-	printf_fail "Key 'collector_log_file' not found in $MONASCA_AGENT_CONF"
+	printf_fail "Key 'forwarder_log_file' not found in $MONASCA_AGENT_CONF"
 fi
 
 # Check Monasca Agent (monasca_url)
 printf "Check Monasca API URL... "
-MONASCA_URL=$(awk -F': ' '/^ *monasca_url/ {print $2}' $MONASCA_AGENT_CONF)
-MONASCA_URL_2=$(awk -F': ' '/^ *url/ {print $2}' $MONASCA_AGENT_CONF)
-if [ -n "$MONASCA_URL" -a "$MONASCA_URL" = "$MONASCA_URL_2" ]; then
+URL=$(sed -n '/^ *monasca_url/ p' $MONASCA_AGENT_CONF | cut -d: -f2- | trim)
+URL_ALT=$(sed -n '/^ *url/ p' $MONASCA_AGENT_CONF | cut -d: -f2- | trim)
+if [ -n "$URL" -a "$URL" = "$URL_ALT" ]; then
+	MONASCA_URL="$URL"
 	printf_ok "$MONASCA_URL"
 else
 	printf_fail "Key 'monasca_url' not found in $MONASCA_AGENT_CONF"
+	[ -n "$VERBOSE " ] && printf_fail "'$URL' != '$URL_ALT'"
 fi
 
 # Check Monasca Agent (keystone_url)
 printf "Check Monasca Keystone URL... "
-KEYSTONE_URL=$(awk -F': ' '/^ *keystone_url/ {print $2}' $MONASCA_AGENT_CONF)
-if [ -n "$MONASCA_CONF_HOST" ]; then
-	printf_ok "$KEYSTONE_URL"
+URL=$(sed -n '/^ *keystone_url/ p' $MONASCA_AGENT_CONF | cut -d: -f2- | trim)
+if [ -n "$URL" ]; then
+	printf_ok "$URL"
 else
 	printf_fail "Set 'keystone_url' value in $MONASCA_AGENT_CONF"
 fi
 
 # Check Monasca Agent (username)
 printf "Check Monasca Agent username... "
-MONASCA_USERNAME=$(awk -F': ' '/^ *username/ {print $2}' $MONASCA_AGENT_CONF)
-if [ -n "$MONASCA_USERNAME" ]; then
+USERNAME=$(awk -F: '/^ *username/ {print $2}' $MONASCA_AGENT_CONF | trim)
+if [ -n "$USERNAME" ]; then
+	MONASCA_USERNAME="$USERNAME"
 	printf_ok "$MONASCA_USERNAME"
 else
 	printf_fail "Set 'username' value in $MONASCA_AGENT_CONF"
@@ -232,9 +340,10 @@ fi
 
 # Check Monasca Agent (password)
 printf "Check Monasca Agent password... "
-MONASCA_PASSWORD=$(awk -F': ' '/^ *password/ {print $2}' $MONASCA_AGENT_CONF)
-if [ -n "$MONASCA_PASSWORD" ]; then
-	printf_ok "OK"
+PASSWORD=$(awk -F: '/^ *password/ {print $2}' $MONASCA_AGENT_CONF | trim)
+if [ -n "$PASSWORD" ]; then
+	MONASCA_PASSWORD="$PASSWORD"
+	printf_ok "$(echo $MONASCA_PASSWORD | tr '[:print:]' '*')"
 else
 	printf_fail "Set 'password' value in $MONASCA_AGENT_CONF"
 fi
@@ -249,26 +358,24 @@ fi
 
 # Check Monasca Agent (polling frequency)
 printf "Check Monasca Agent polling frequency... "
-MONASCA_POLL_RATE=$(awk -F': ' '/^ *check_freq/ {print $2}' $MONASCA_AGENT_CONF)
-if [ -n "$MONASCA_POLL_RATE" -a $MONASCA_POLL_RATE -ge $POLL_THRESHOLD ]; then
-	printf_ok "$MONASCA_POLL_RATE"
+POLL_RATE=$(awk -F: '/^ *check_freq/ {print $2}' $MONASCA_AGENT_CONF | trim)
+if [ -n "$POLL_RATE" -a $POLL_RATE -ge $POLL_THRESHOLD ]; then
+	printf_ok "$POLL_RATE seconds"
 else
-	printf_warn "$MONASCA_POLL_RATE (consider a higher value)"
+	printf_warn "$POLL_RATE seconds (consider a higher value)"
 fi
 
 # Check Ceilometer polling frequency
 printf "Check Ceilometer polling frequency... "
-PIPELINE_CONF=/etc/ceilometer/pipeline.yaml
-PIPELINE_POLL_RATE=$(awk -F': ' '/interval/ {print $2; exit}' $PIPELINE_CONF)
-if [ -n "$PIPELINE_POLL_RATE" -a $PIPELINE_POLL_RATE -ge $POLL_THRESHOLD ]; then
-	printf_ok "$PIPELINE_POLL_RATE"
+POLL_RATE=$(awk -F: '/interval/ {print $2; exit}' $PIPELINE_CONF | trim)
+if [ -n "$POLL_RATE" -a $POLL_RATE -ge $POLL_THRESHOLD ]; then
+	printf_ok "$POLL_RATE seconds"
 else
-	printf_warn "$PIPELINE_POLL_RATE (consider a higher value)"
+	printf_warn "$POLL_RATE seconds (consider a higher value)"
 fi
 
 # Check Ceilometer central agent logfile
 printf "Check Ceilometer central agent logfile... "
-CENTRAL_AGENT_LOG=/var/log/ceilometer/ceilometer-agent-central.log
 if [ -r "$CENTRAL_AGENT_LOG" ]; then
 	printf_ok "$CENTRAL_AGENT_LOG"
 else
@@ -289,7 +396,7 @@ for ITEM in $POINTS; do
 	[ -n "$INFO" ] && ACTUAL=$((ACTUAL + 1))
 done
 if [ $ACTUAL -eq $EXPECTED ]; then
-	printf_ok "OK ($(echo $POINTS | fmt | tr '\n' ' '))"
+	printf_ok "OK ($(echo $POINTS | awk '{$1=$1; print}'))"
 else
 	printf_fail "Could not find all entry points at $FILE"
 fi
@@ -349,20 +456,44 @@ if [ $COUNT_METRICS -eq $COUNT_RESULTS ]; then
 	printf_ok "OK ($COUNT_RESULTS:$RESULTS)"
 else
 	printf_fail "Failed"
+	[ -n "$VERBOSE" ] && printf_curl
+fi
+
+# Check Monasca recent metadata for region
+printf "Check Monasca recent metadata for region... "
+START_SOME_TIME_AGO=$(date -u -d @$SOME_TIME_AGO +%Y-%m-%dT%H:%M:%SZ)
+FILTER="start_time=$START_SOME_TIME_AGO&merge_metrics=true"
+URL_PATH="/metrics/measurements?name=region.pool_ip&dimensions=region:$REGION"
+PATTERN="latitude|longitude|location|cpu_allocation_ratio|ram_allocation_ratio"
+COUNT=$(echo "$PATTERN" | awk -F'|' '{print NF}')
+RESPONSE=$(printf_monasca_query "$URL_PATH&$FILTER")
+MEASURES_COUNT=$(echo "$RESPONSE" | grep -v '"id"' | grep 'Z"' | wc -l)
+METADATA_ACTUAL=$(echo "$RESPONSE" | egrep "$PATTERN" | wc -l)
+METADATA_EXPECT=$((MEASURES_COUNT * COUNT))
+if [ $METADATA_ACTUAL -eq $METADATA_EXPECT ]; then
+	printf_ok "OK ($COUNT: $(echo "$PATTERN" | tr '|' ' '))"
+else
+	printf_fail "No metadata found"
 fi
 
 # Check Monasca recent measurements for region
-START=$(date -u -d @$SOME_TIME_AGO +%Y-%m-%dT%H:%M:%SZ)
-FILTER="start_time=$START&merge_metrics=true"
+START_SOME_TIME_AGO=$(date -u -d @$SOME_TIME_AGO +%Y-%m-%dT%H:%M:%SZ)
+START_TODAY=$(date -u -d @$NOW +%Y-%m-%dT00:00:00Z)
+FILTER_1="start_time=$START_SOME_TIME_AGO&merge_metrics=true"
+FILTER_2="start_time=$START_TODAY&merge_metrics=true"
 METRICS="$METRICS_FOR_REGIONS"
 for NAME in $METRICS; do
 	printf "Check Monasca recent measurements for $NAME... "
 	URL_PATH="/metrics/measurements?name=$NAME&dimensions=region:$REGION"
-	COUNT=$(printf_monasca_query "$URL_PATH&$FILTER" | grep 'Z"' | wc -l)
+	FILTER="$FILTER_1"
+	[ $NAME = "region.sanity_status" ] && FILTER="$FILTER_2"
+	RESPONSE=$(printf_monasca_query "$URL_PATH&$FILTER")
+	COUNT=$(echo "$RESPONSE" | grep -v '"id"' | grep 'Z"' | wc -l)
 	if [ $COUNT -gt 0 ]; then
 		printf_ok "OK ($COUNT measurements)"
 	else
 		printf_fail "No measurements found"
+		[ -n "$VERBOSE" ] && printf_curl
 	fi
 done
 
@@ -378,103 +509,129 @@ fi
 
 # Check Monasca metrics for image
 METRICS="$METRICS_FOR_IMAGES"
+IMAGES=$(glance image-list | awk '/active/ {print $4}' | tr '\n' ' ')
+COUNT_IMAGES=$(echo $IMAGES | wc -w)
 for NAME in $METRICS; do
 	printf "Check Monasca metrics for $NAME... "
 	URL_PATH="/metrics?name=$NAME&dimensions=region:$REGION"
 	RESPONSE=$(printf_monasca_query "$URL_PATH")
 	RESOURCES=$(echo "$RESPONSE" | awk -F'"' '/"resource_id"/ {print $4}')
 	COUNT=$(echo "$RESOURCES" | wc -w)
-	if [ $COUNT -gt 0 ]; then
-		printf_ok "OK ($COUNT metrics for $NAME)"
+	if [ $COUNT -ge $COUNT_IMAGES ]; then
+		printf_ok "OK ($COUNT metrics out or $COUNT_IMAGES images)"
 	else
 		printf_fail "Failed"
+		[ -n "$VERBOSE" ] && printf_curl
+
 	fi
 	eval COUNT_$NAME=$COUNT
 done
 
 # Check Monasca recent measurements for image
-START=$(date -u -d @$SOME_TIME_AGO +%Y-%m-%dT%H:%M:%SZ)
-FILTER="start_time=$START&merge_metrics=true"
+START_TODAY=$(date -u -d @$NOW +%Y-%m-%dT00:00:00Z)
+FILTER="start_time=$START_TODAY&merge_metrics=true"
 METRICS="$METRICS_FOR_IMAGES"
 for NAME in $METRICS; do
 	printf "Check Monasca recent measurements for $NAME... "
 	URL_PATH="/metrics/measurements?name=$NAME&dimensions=region:$REGION"
-	COUNT=$(printf_monasca_query "$URL_PATH&$FILTER" | grep 'Z"' | wc -l)
+	RESPONSE=$(printf_monasca_query "$URL_PATH&$FILTER")
+	COUNT=$(echo "$RESPONSE" | grep -v '"id"' | grep 'Z"' | wc -l)
 	eval RES_COUNT=\$COUNT_$NAME
 	if [ $COUNT -gt 0 ]; then
-		printf_ok "OK ($COUNT measurements, $RES_COUNT resources)"
+		printf_ok "OK ($COUNT measurements, $RES_COUNT metrics)"
 	else
 		printf_fail "No measurements found"
+		[ -n "$VERBOSE" ] && printf_curl
 	fi
 done
 
 # Check list of compute nodes
 printf "Check list of compute nodes... "
-COMPUTE_NODE_LIST=$(nova host-list | awk -F'|' '/compute/ {print $2}' | fmt)
-COUNT_COMPUTE_NODES=$(echo $COMPUTE_NODE_LIST | wc -w)
-if [ -n "$COMPUTE_NODE_LIST" ]; then
-	printf_ok "$COMPUTE_NODE_LIST"
+COMPUTE_NODES=$(nova host-list | awk '/compute/ {print $2}' | tr '\n' ' ')
+COUNT_COMPUTE_NODES=$(echo $COMPUTE_NODES | wc -w)
+if [ -n "$COMPUTE_NODES" ]; then
+	printf_ok "$COMPUTE_NODES"
 else
-	printf_fail "Could not get compute nodes (check OS_* env variables)"
+	printf_fail "Could not get list of compute nodes"
+fi
+
+# Check execution of remote commands at compute nodes
+printf "Check execution of remote commands at compute nodes... "
+if check_ssh $COMPUTE_NODES; then
+	printf_ok "OK ($SSH)"
+else
+	printf_fail "Could not get ssh access to compute nodes (check ssh-key)"
 fi
 
 # Check Ceilometer polling frequency at compute nodes
-CONF=/etc/ceilometer/pipeline.yaml
-for NAME in $COMPUTE_NODE_LIST; do
+FILE=$PIPELINE_CONF
+for NAME in $COMPUTE_NODES; do
 	printf "Check Ceilometer polling frequency at compute node $NAME... "
-	AWK="awk -F': ' '/interval/ {print \$2; exit}' $PIPELINE_CONF"
-	POLL_RATE=$(ssh $NAME "$AWK" 2>/dev/null)
-	if [ -z "$POLL_RATE" ]; then
-		printf_fail "Ceilometer pipeline configuration $CONF not found"
+	AWK="awk -F: '/interval/ {print \$2; exit}' $FILE"
+	REMOTE="$SSH $NAME"
+	POLL_RATE=$($REMOTE "$AWK" 2>/dev/null | trim)
+	if [ -z "$SSH" ]; then
+		printf_fail "Skipped"
+	elif [ -z "$POLL_RATE" ]; then
+		printf_fail "Ceilometer pipeline configuration $FILE not found"
 	elif [ $POLL_RATE -lt $POLL_THRESHOLD ]; then
-		printf_warn "$POLL_RATE (consider a higher value)"
+		printf_warn "$POLL_RATE seconds (consider a higher value)"
 	else
-		printf_ok "$POLL_RATE"
+		printf_ok "$POLL_RATE seconds"
 	fi
 done
 
 # Check Ceilometer entry points at compute nodes
 FILE=/usr/lib/python2.7/dist-packages/ceilometer-*.egg-info/entry_points.txt
-for NAME in $COMPUTE_NODE_LIST; do
+for NAME in $COMPUTE_NODES; do
 	printf "Check Ceilometer entry points at compute node $NAME... "
 	SED="sed -n '/\[ceilometer.poll.compute\]/,/\[/ p' $FILE"
-	INFO=$(ssh $NAME "$SED" 2>/dev/null | grep 'compute.info.*HostPollster')
-	if [ -n "$INFO" ]; then
-		printf_ok "OK ($INFO)"
-	else
+	REMOTE="$SSH $NAME"
+	INFO=$($REMOTE "$SED" 2>/dev/null | grep 'compute.info.*HostPollster')
+	if [ -z "$SSH" ]; then
+		printf_fail "Skipped"
+	elif [ -z "$INFO" ]; then
 		printf_fail "Could not find 'compute.info' entry point"
+	else
+		printf_ok "OK ($INFO)"
 	fi
 done
 
 # Check Ceilometer host pollster class at compute nodes
 CLASSNAME=ceilometer.compute.pollsters.host.HostPollster
 PYTHON="python -c \"import ${CLASSNAME%.*}; print $CLASSNAME\""
-for NAME in $COMPUTE_NODE_LIST; do
+for NAME in $COMPUTE_NODES; do
 	printf "Check Ceilometer host pollster class at compute node $NAME... "
-	CLASS=$(ssh $NAME "$PYTHON" 2>/dev/null)
-	if [ "$CLASS" = "<class '$CLASSNAME'>" ]; then
-		printf_ok "$CLASSNAME"
-	else
+	REMOTE="$SSH $NAME"
+	CLASS=$($REMOTE "$PYTHON" 2>/dev/null)
+	if [ -z "$SSH" ]; then
+		printf_fail "Skipped"
+	elif [ "$CLASS" != "<class '$CLASSNAME'>" ]; then
 		printf_fail "Could not load class (please check installation)"
+	else
+		printf_ok "$CLASSNAME"
 	fi
 done
 
 # Check last poll from host pollster at compute nodes
-COMPUTE_AGENT_LOG=/var/log/ceilometer/ceilometer-agent-compute.log
-for NAME in $COMPUTE_NODE_LIST; do
+for NAME in $COMPUTE_NODES; do
 	printf "Check last poll from host pollster at compute node $NAME... "
 	PATTERN="$(date +%Y-%m-%d).*Polling pollster compute\.info"
 	GREP="grep \"$PATTERN\" $COMPUTE_AGENT_LOG"
-	TIMESTAMP=$(ssh $NAME "$GREP" 2>/dev/null | tail -1 | cut -d' ' -f1,2)
-	if [ -z "$TIMESTAMP" ]; then
+	REMOTE="$SSH $NAME"
+	TIMESTAMP=$($REMOTE "$GREP" 2>/dev/null | tail -1 | cut -d' ' -f1,2)
+	if [ -z "$SSH" ]; then
+		printf_fail "Skipped"
+		continue
+	elif [ -z "$TIMESTAMP" ]; then
 		printf_fail "Could not find polling today at $COMPUTE_AGENT_LOG"
 		continue
 	fi
 	PATTERN="${TIMESTAMP%.*}.*Skip polling pollster compute\.info"
 	GREP="grep \"$PATTERN\" $COMPUTE_AGENT_LOG"
-	SKIP=$(ssh $NAME "$GREP" 2>/dev/null | tail -1)
+	SKIP=$($REMOTE "$GREP" 2>/dev/null | tail -1)
 	if [ -n "$SKIP" ]; then
-		printf_fail "Failed: $SKIP"
+		printf_warn "Warning: $SKIP"
 	else
 		printf_ok "$TIMESTAMP UTC"
 	fi
@@ -490,16 +647,101 @@ for NAME in $METRICS; do
 	URL_PATH="/metrics?name=$NAME&dimensions=region:$REGION"
 	RESPONSE=$(printf_monasca_query "$URL_PATH")
 	RESOURCES=$(echo "$RESPONSE" | awk -F'"' '/resource_id/ {print $4}')
-	RES_COUNT=$(echo "$RESOURCES" | wc -w)
-	RES_MSG="$RES_COUNT metrics out of $COUNT_COMPUTE_NODES compute nodes"
+	NODE_NAMES=$(echo "$RESOURCES" | sed 's/\(.*\)_\1/\1/' | tr '\n' ' ')
+	NODE_COUNT=$(echo "$NODE_NAMES" | wc -w)
+	NODE_MSG="$NODE_COUNT metrics out of $COUNT_COMPUTE_NODES compute nodes"
 	# get measurements
 	URL_PATH="/metrics/measurements?name=$NAME&dimensions=region:$REGION"
 	MEASUREMENTS=$(printf_monasca_query "$URL_PATH&$FILTER")
-	COUNT=$(echo "$MEASUREMENTS" | grep 'Z"' | wc -l)
-	if [ $COUNT -gt 0 -a $RES_COUNT -eq $COUNT_COMPUTE_NODES ]; then
-		printf_ok "OK ($COUNT measurements, $RES_MSG)"
+	COUNT=$(echo "$MEASUREMENTS" | grep -v '"id"' | grep 'Z"' | wc -l)
+	if [ $COUNT -gt 0 -a $NODE_COUNT -ge $COUNT_COMPUTE_NODES ]; then
+		printf_ok "OK ($COUNT measurements, $NODE_MSG)"
+	elif [ $RES_COUNT -eq 0 ]; then
+		printf_fail "Failed ($NODE_MSG)"
 	else
-		printf_fail "Failed ($COUNT measurements, $RES_MSG)"
-		[ -n "$VERBOSE" ] && printf_fail "$RESOURCES" #"\n$MEASUREMENTS"
+		printf_warn "Warning ($COUNT measurements, $NODE_MSG)"
+		[ -z "$VERBOSE" ] && continue
+		printf_warn "* Compute nodes with metrics: $NODE_NAMES"
+		printf_curl "* Sample Monasca API query: "
+		printf "\n"
+	fi
+done
+
+# Check Monasca metrics for host services
+METRIC=process.pid_count
+for COMPONENT in $METRICS_FOR_HOST_SERVICES; do
+	printf "Check Monasca metrics for $COMPONENT... "
+	DIMENSIONS="region:$REGION,component:$COMPONENT"
+	URL_PATH="/metrics?name=$METRIC&dimensions=$DIMENSIONS"
+	RESPONSE=$(printf_monasca_query "$URL_PATH")
+	RESOURCES=$(echo "$RESPONSE" | awk -F'"' '/"hostname"/ {print $4}')
+	COUNT=$(echo "$RESOURCES" | wc -w)
+	if [ $COUNT -gt 0 ]; then
+		printf_ok "OK ($COUNT metrics for $COMPONENT)"
+	else
+		printf_fail "Failed"
+		[ -n "$VERBOSE" ] && printf_curl
+
+	fi
+	NAME=$(echo "$COMPONENT" | tr '-' '_')
+	eval COUNT_$NAME=$COUNT
+done
+
+# Check Monasca recent measurements for host services
+START=$(date -u -d @$SOME_TIME_AGO +%Y-%m-%dT%H:%M:%SZ)
+FILTER="start_time=$START&merge_metrics=true"
+METRIC=process.pid_count
+for COMPONENT in $METRICS_FOR_HOST_SERVICES; do
+	printf "Check Monasca recent measurements for $COMPONENT... "
+	DIMENSIONS="region:$REGION,component:$COMPONENT"
+	URL_PATH="/metrics/measurements?name=$METRIC&dimensions=$DIMENSIONS"
+	RESPONSE=$(printf_monasca_query "$URL_PATH&$FILTER")
+	COUNT=$(echo "$RESPONSE" | grep -v '"id"' | grep 'Z"' | wc -l)
+	NAME=$(echo "$COMPONENT" | tr '-' '_')
+	eval RES_COUNT=\$COUNT_$NAME
+	if [ $COUNT -gt 0 ]; then
+		printf_ok "OK ($COUNT measurements, $RES_COUNT resources)"
+	else
+		printf_fail "No measurements found"
+		[ -n "$VERBOSE" ] && printf_curl
+	fi
+done
+
+# Check Monasca metrics for active VMs
+printf "Check Monasca metrics for active VMs... "
+VMS=$(nova list --all-tenants | awk '/ACTIVE/ {print $2}' | tr '\n' ' ')
+COUNT_VMS=$(echo $VMS | wc -w)
+METRIC=instance
+URL_PATH="/metrics?name=$METRIC&dimensions=region:$REGION"
+RESPONSE=$(printf_monasca_query "$URL_PATH")
+RESOURCES=$(echo "$RESPONSE" | awk -F'"' '/"resource_id"/ {print $4}')
+COUNT=$(echo "$RESOURCES" | wc -w)
+if [ $COUNT -ge $COUNT_VMS ]; then
+	printf_ok "OK ($COUNT metrics out or $COUNT_VMS active VMs)"
+else
+	printf_fail "Failed"
+	[ -n "$VERBOSE" ] && printf_curl
+fi
+
+# Check Monasca recent measurements for active VMs
+START=$(date -u -d @$SOME_TIME_AGO +%Y-%m-%dT%H:%M:%SZ)
+FILTER="start_time=$START&merge_metrics=true"
+PATTERN=$(echo $METRICS_FOR_VMS | sed 's/\(\w*\)/"\1"/g' | tr ' ' '|')
+COUNT_METADATA=$(echo $METRICS_FOR_VMS | wc -w)
+METRIC=instance
+for ID in $VMS; do
+	printf "Check Monasca recent measurements for active VM $ID... "
+	DIMENSIONS="region:$REGION,resource_id:$ID"
+	URL_PATH="/metrics/measurements?name=$METRIC&dimensions=$DIMENSIONS"
+	RESPONSE=$(printf_monasca_query "$URL_PATH&$FILTER" | egrep "$PATTERN")
+	METADATA=$(echo "$RESPONSE" | awk -F'"' '{print $2}' | sort -u)
+	COUNT=$(echo "$METADATA" | wc -w)
+	if [ $COUNT -ge $COUNT_METADATA ]; then
+		printf_ok "OK ($COUNT: $(echo $METADATA))"
+	elif [ $COUNT -gt 0 ]; then
+		printf_warn "$COUNT out of $COUNT_METADATA ($(echo $METADATA))"
+	else
+		printf_fail "Failed"
+		[ -n "$VERBOSE" ] && printf_curl
 	fi
 done
