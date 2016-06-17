@@ -59,6 +59,8 @@ MONASCA_URL=
 MONASCA_USERNAME=
 MONASCA_PASSWORD=
 MONASCA_AGENT_HOME=
+CEILOMETER_PKG=
+PYTHON_DIST_PKG=
 alias trim='tr -d \ '
 
 # Command line options defaults
@@ -252,20 +254,22 @@ else
 	printf_ok "$(python -V 2>&1) at $(which python)"
 fi
 
-# Check Monasca Agent (installation path)
-printf "Check Monasca Agent installation path... "
+# Check Monasca Agent (installation path and version)
+printf "Check Monasca Agent installation... "
 for DIR in /opt/monasca /monasca/monasca_agent_env; do
 	if [ -d $DIR ]; then
 		MONASCA_AGENT_HOME=$DIR
+		INFO=$($MONASCA_AGENT_HOME/bin/pip show monasca-agent)
+		VERSION=$(echo "$INFO" | awk '/^Version:/ {print $2}')
 		break
 	fi
 done
 if [ -z "$MONASCA_AGENT_HOME" ]; then
 	printf_fail "Not found"
 elif [ $(expr "$MONASCA_AGENT_HOME" : "^/opt/.*") -eq 0 ]; then
-	printf_warn "$MONASCA_AGENT_HOME (this path is deprecated)"
+	printf_warn "$VERSION at $MONASCA_AGENT_HOME (this path is deprecated)"
 else
-	printf_ok "$MONASCA_AGENT_HOME"
+	printf_ok "$VERSION at $MONASCA_AGENT_HOME"
 fi
 
 # Check Monasca Agent (configuration)
@@ -382,27 +386,50 @@ else
 	printf_fail "Not found"
 fi
 
+# Check Ceilometer installation path and version
+printf "Check Ceilometer installation path and version... "
+PYTHON_DIST_PKG=$(python -c "import sys; \
+	print [dir for dir in sys.path if dir.endswith('dist-packages')][-1]")
+if [ -d "$PYTHON_DIST_PKG/ceilometer" ]; then
+	CEILOMETER_PKG="$PYTHON_DIST_PKG/ceilometer"
+	VERSION=$(pip show ceilometer | awk '/^Version:/ {print $2}')
+	printf_ok "$VERSION at $CEILOMETER_PKG"
+else
+	printf_fail "Not found"
+fi
+
+# Check Ceilometer plugin for Monasca (Ceilosca)
+printf "Check Ceilometer plugin for Monasca (Ceilosca)... "
+FILE=$PYTHON_DIST_PKG/ceilometer-*.egg-info/ceilosca.txt
+VERSION=$(awk -F= '{print $2}' $FILE 2>/dev/null)
+if [ -n "$VERSION" ]; then
+	printf_ok "$VERSION"
+else
+	printf_warn "Could not find version (please check installation details)"
+fi
+
 # Check Ceilometer entry points at central node
-printf "Check Ceilometer entry points central node... "
-FILE=/usr/lib/python2.7/dist-packages/ceilometer-*.egg-info/entry_points.txt
-POINTS="publisher|MonascaPublisher \
-	metering.storage|impl_monasca_filtered:Connection \
-	poll.central|RegionPollster"
+printf "Check Ceilometer entry points at central node... "
+FILE=$PYTHON_DIST_PKG/ceilometer-*.egg-info/entry_points.txt
+POINTS="poll.central|RegionPollster \
+	publisher|MonascaPublisher \
+	metering.storage|monasca_filtered:Connection"
 EXPECTED=$(echo "$POINTS" | wc -w); ACTUAL=0
 for ITEM in $POINTS; do
-	CLASS=${ITEM#*|}
 	SECTION=ceilometer.${ITEM%|*}
-	INFO=$(sed -n "/\[$SECTION\]/,/\[/ p" $FILE | grep ".*=.*$CLASS")
+	CLASSNAME=${ITEM#*|}
+	INFO=$(sed -n "/\[$SECTION\]/,/\[/ p" $FILE | grep ".*=.*$CLASSNAME")
 	[ -n "$INFO" ] && ACTUAL=$((ACTUAL + 1))
 done
 if [ $ACTUAL -eq $EXPECTED ]; then
-	printf_ok "OK ($(echo $POINTS | awk '{$1=$1; print}'))"
+	printf_ok "OK ($(echo $POINTS))"
 else
 	printf_fail "Could not find all entry points at $FILE"
 fi
 
 # Check Ceilometer storage driver for Monasca
 printf "Check Ceilometer storage driver for Monasca... "
+CEILOSCA=$PYTHON_DIST_PKG/ceilometer-*.egg-info/ceilosca.txt
 CLASSNAME=ceilometer.storage.impl_monasca_filtered.Connection
 CLASS=$(python -c "import ${CLASSNAME%.*}; print $CLASSNAME" 2>/dev/null)
 if [ "$CLASS" = "<class '$CLASSNAME'>" ]; then
@@ -429,6 +456,16 @@ if [ "$CLASS" = "<class '$CLASSNAME'>" ]; then
 	printf_ok "$CLASSNAME"
 else
 	printf_fail "Could not load class (please check installation details)"
+fi
+
+# Check Ceilometer region pollster version
+printf "Check Ceilometer region pollster version... "
+POLLSTER=$CEILOMETER_PKG/region/region.py
+VERSION=$(awk '/# Version:/ {print $3}' $POLLSTER)
+if [ -n "$VERSION" ]; then
+	printf_ok "$VERSION"
+else
+	printf_warn "Undefined"
 fi
 
 # Check last poll from region pollster
@@ -582,7 +619,7 @@ for NAME in $COMPUTE_NODES; do
 done
 
 # Check Ceilometer entry points at compute nodes
-FILE=/usr/lib/python2.7/dist-packages/ceilometer-*.egg-info/entry_points.txt
+FILE=$PYTHON_DIST_PKG/ceilometer-*.egg-info/entry_points.txt
 for NAME in $COMPUTE_NODES; do
 	printf "Check Ceilometer entry points at compute node $NAME... "
 	SED="sed -n '/\[ceilometer.poll.compute\]/,/\[/ p' $FILE"
