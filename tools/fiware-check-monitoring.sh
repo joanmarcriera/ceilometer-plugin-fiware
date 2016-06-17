@@ -429,7 +429,6 @@ fi
 
 # Check Ceilometer storage driver for Monasca
 printf "Check Ceilometer storage driver for Monasca... "
-CEILOSCA=$PYTHON_DIST_PKG/ceilometer-*.egg-info/ceilosca.txt
 CLASSNAME=ceilometer.storage.impl_monasca_filtered.Connection
 CLASS=$(python -c "import ${CLASSNAME%.*}; print $CLASSNAME" 2>/dev/null)
 if [ "$CLASS" = "<class '$CLASSNAME'>" ]; then
