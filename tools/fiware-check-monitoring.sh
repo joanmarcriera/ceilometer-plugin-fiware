@@ -64,7 +64,7 @@ PYTHON_DIST_PKG=
 alias trim='tr -d \ '
 
 # Command line options defaults
-REGION=$(awk -F= '/^(os_)?region_name/ {print $2}' $NOVA_CONF | trim)
+REGION=$(awk -F= '/^(os_)?region_name/ {print $2; exit}' $NOVA_CONF | trim)
 POLL_THRESHOLD=300
 MEASURE_TIME=60
 SSH_KEY=
@@ -191,16 +191,33 @@ printf_curl() {
 	tput setaf 1; printf "$msg"; awk '{$1=$1; print}' $TEMP_FILE; tput sgr0
 }
 
+printf_measurements() {
+	measurements_query="$1"
+	measurements_filter="$2"
+	dimensions=$(printf_monasca_query "/metrics?${measurements_query#*\?}" \
+		| awk -F'"' '/hostname|resource_id/ {print $2 ":" $4}')
+	for item in $dimensions; do
+		query="$measurements_query,$item"
+		result=$(printf_monasca_query "$query&$measurements_filter")
+		sample=$(echo "$result" | awk '/\.0,/ {print $NF}' | tail -1)
+		printf_warn "* Last measurement for ${item#*:}: $sample"
+	done
+}
+
 # Lists of metrics (or metadata items, when appropriate)
 METRICS_FOR_IMAGES="\
 	image"
 
 METRICS_FOR_VMS="\
-	name \
-	host \
-	status \
-	image_ref \
-	instance_type"
+	instance:name \
+	instance:host \
+	instance:status \
+	instance:image_ref \
+	instance:instance_type \
+	memory.usage \
+	memory.resident \
+	disk.capacity \
+	cpu_util"
 
 METRICS_FOR_REGIONS="\
 	region.used_ip \
@@ -243,7 +260,7 @@ NOW=$(date +%s)
 SOME_TIME_AGO=$((NOW - $MEASURE_TIME * 60))
 
 # Recent measurements period
-printf_warn "Considering measurements within last $MEASURE_TIME minutes"
+printf_warn "[Considering measurements within last $MEASURE_TIME minutes]"
 
 # Check Python interpreter
 printf "Check Python interpreter... "
@@ -408,28 +425,19 @@ else
 	printf_warn "Could not find version (please check installation details)"
 fi
 
-# Check Ceilometer entry points at central node
-printf "Check Ceilometer entry points at central node... "
-FILE=$PYTHON_DIST_PKG/ceilometer-*.egg-info/entry_points.txt
-POINTS="poll.central|RegionPollster \
-	publisher|MonascaPublisher \
-	metering.storage|monasca_filtered:Connection"
-EXPECTED=$(echo "$POINTS" | wc -w); ACTUAL=0
-for ITEM in $POINTS; do
-	SECTION=ceilometer.${ITEM%|*}
-	CLASSNAME=${ITEM#*|}
-	INFO=$(sed -n "/\[$SECTION\]/,/\[/ p" $FILE | grep ".*=.*$CLASSNAME")
-	[ -n "$INFO" ] && ACTUAL=$((ACTUAL + 1))
-done
-if [ $ACTUAL -eq $EXPECTED ]; then
-	printf_ok "OK ($(echo $POINTS))"
+# Check Ceilometer region pollster version
+printf "Check Ceilometer region pollster version... "
+POLLSTER=$CEILOMETER_PKG/region/region.py
+VERSION=$(awk '/# Version:/ {print $3}' $POLLSTER)
+if [ -n "$VERSION" ]; then
+	printf_ok "$VERSION"
 else
-	printf_fail "Could not find all entry points at $FILE"
+	printf_warn "Could not find version (please check installation details)"
 fi
 
-# Check Ceilometer storage driver for Monasca
-printf "Check Ceilometer storage driver for Monasca... "
-CLASSNAME=ceilometer.storage.impl_monasca_filtered.Connection
+# Check Ceilometer region pollster class
+printf "Check Ceilometer region pollster class... "
+CLASSNAME=ceilometer.region.region.RegionPollster
 CLASS=$(python -c "import ${CLASSNAME%.*}; print $CLASSNAME" 2>/dev/null)
 if [ "$CLASS" = "<class '$CLASSNAME'>" ]; then
 	printf_ok "$CLASSNAME"
@@ -447,9 +455,9 @@ else
 	printf_fail "Could not load class (please check installation details)"
 fi
 
-# Check Ceilometer region pollster class
-printf "Check Ceilometer region pollster class... "
-CLASSNAME=ceilometer.region.region.RegionPollster
+# Check Ceilometer storage driver for Monasca
+printf "Check Ceilometer storage driver for Monasca... "
+CLASSNAME=ceilometer.storage.impl_monasca_filtered.Connection
 CLASS=$(python -c "import ${CLASSNAME%.*}; print $CLASSNAME" 2>/dev/null)
 if [ "$CLASS" = "<class '$CLASSNAME'>" ]; then
 	printf_ok "$CLASSNAME"
@@ -457,22 +465,33 @@ else
 	printf_fail "Could not load class (please check installation details)"
 fi
 
-# Check Ceilometer region pollster version
-printf "Check Ceilometer region pollster version... "
-POLLSTER=$CEILOMETER_PKG/region/region.py
-VERSION=$(awk '/# Version:/ {print $3}' $POLLSTER)
-if [ -n "$VERSION" ]; then
-	printf_ok "$VERSION"
+# Check Ceilometer entry points at this node
+printf "Check Ceilometer entry points at this node... "
+FILE=$PYTHON_DIST_PKG/ceilometer-*.egg-info/entry_points.txt
+POINTS="poll.central|RegionPollster \
+	publisher|MonascaPublisher \
+	metering.storage|monasca_filtered:Connection"
+EXPECTED=$(echo "$POINTS" | wc -w); ACTUAL=0
+for ITEM in $POINTS; do
+	SECTION=ceilometer.${ITEM%|*}
+	CLASSNAME=${ITEM#*|}
+	INFO=$(sed -n "/\[$SECTION\]/,/\[/ p" $FILE | grep ".*=.*$CLASSNAME")
+	[ -n "$INFO" ] && ACTUAL=$((ACTUAL + 1))
+done
+if [ $ACTUAL -eq $EXPECTED ]; then
+	printf_ok "OK ($(echo $POINTS))"
 else
-	printf_warn "Undefined"
+	printf_fail "Could not find all entry points at $FILE"
 fi
 
-# Check last poll from region pollster
-printf "Check last poll from region pollster... "
+# Check last poll from region pollster at this node
+printf "Check last poll from region pollster at this node... "
 PATTERN="$(date +%Y-%m-%d).*Polling pollster region"
 TIMESTAMP=$(grep "$PATTERN" $CENTRAL_AGENT_LOG | tail -1 | cut -d' ' -f1,2)
 if [ -n "$TIMESTAMP" ]; then
 	printf_ok "$TIMESTAMP UTC"
+elif [ -z "$(pgrep -f ceilometer-agent-central)" ]; then
+	printf_warn "Skipped: ceilometer-agent-central not active in this node"
 else
 	printf_fail "Could not find polling today at $CENTRAL_AGENT_LOG"
 fi
@@ -482,8 +501,8 @@ printf "Check Monasca metrics for region... "
 METRICS="$METRICS_FOR_REGIONS"
 RESULTS=""
 for NAME in $METRICS; do
-	URL_PATH="/metrics?name=$NAME&dimensions=region:$REGION"
-	RESPONSE=$(printf_monasca_query "$URL_PATH")
+	QUERY="/metrics?name=$NAME&dimensions=region:$REGION"
+	RESPONSE=$(printf_monasca_query "$QUERY")
 	RESULTS="$RESULTS $(echo "$RESPONSE" | awk -F'"' '/"name"/ {print $4}')"
 done
 COUNT_METRICS=$(echo $METRICS | wc -w)
@@ -491,7 +510,7 @@ COUNT_RESULTS=$(echo $RESULTS | wc -w)
 if [ $COUNT_METRICS -eq $COUNT_RESULTS ]; then
 	printf_ok "OK ($COUNT_RESULTS:$RESULTS)"
 else
-	printf_fail "Failed"
+	printf_fail "Missing metrics"
 	[ -n "$VERBOSE" ] && printf_curl
 fi
 
@@ -499,17 +518,17 @@ fi
 printf "Check Monasca recent metadata for region... "
 START_SOME_TIME_AGO=$(date -u -d @$SOME_TIME_AGO +%Y-%m-%dT%H:%M:%SZ)
 FILTER="start_time=$START_SOME_TIME_AGO&merge_metrics=true"
-URL_PATH="/metrics/measurements?name=region.pool_ip&dimensions=region:$REGION"
+QUERY="/metrics/measurements?name=region.pool_ip&dimensions=region:$REGION"
 PATTERN="latitude|longitude|location|cpu_allocation_ratio|ram_allocation_ratio"
 COUNT=$(echo "$PATTERN" | awk -F'|' '{print NF}')
-RESPONSE=$(printf_monasca_query "$URL_PATH&$FILTER")
+RESPONSE=$(printf_monasca_query "$QUERY&$FILTER")
 MEASURES_COUNT=$(echo "$RESPONSE" | grep -v '"id"' | grep 'Z"' | wc -l)
 METADATA_ACTUAL=$(echo "$RESPONSE" | egrep "$PATTERN" | wc -l)
 METADATA_EXPECT=$((MEASURES_COUNT * COUNT))
 if [ $METADATA_ACTUAL -eq $METADATA_EXPECT ]; then
 	printf_ok "OK ($COUNT: $(echo "$PATTERN" | tr '|' ' '))"
 else
-	printf_fail "No metadata found"
+	printf_fail "Missing metadata"
 fi
 
 # Check Monasca recent measurements for region
@@ -520,10 +539,10 @@ FILTER_2="start_time=$START_TODAY&merge_metrics=true"
 METRICS="$METRICS_FOR_REGIONS"
 for NAME in $METRICS; do
 	printf "Check Monasca recent measurements for $NAME... "
-	URL_PATH="/metrics/measurements?name=$NAME&dimensions=region:$REGION"
+	QUERY="/metrics/measurements?name=$NAME&dimensions=region:$REGION"
 	FILTER="$FILTER_1"
 	[ $NAME = "region.sanity_status" ] && FILTER="$FILTER_2"
-	RESPONSE=$(printf_monasca_query "$URL_PATH&$FILTER")
+	RESPONSE=$(printf_monasca_query "$QUERY&$FILTER")
 	COUNT=$(echo "$RESPONSE" | grep -v '"id"' | grep 'Z"' | wc -l)
 	if [ $COUNT -gt 0 ]; then
 		printf_ok "OK ($COUNT measurements)"
@@ -533,12 +552,14 @@ for NAME in $METRICS; do
 	fi
 done
 
-# Check last poll from image pollster
-printf "Check last poll from image pollster... "
+# Check last poll from image pollster at this node
+printf "Check last poll from image pollster at this node... "
 PATTERN="$(date +%Y-%m-%d).*Polling pollster image"
 TIMESTAMP=$(grep "$PATTERN" $CENTRAL_AGENT_LOG | tail -1 | cut -d' ' -f1,2)
 if [ -n "$TIMESTAMP" ]; then
 	printf_ok "$TIMESTAMP UTC"
+elif [ -z "$(pgrep -f ceilometer-agent-central)" ]; then
+	printf_warn "Skipped: ceilometer-agent-central not active in this node"
 else
 	printf_fail "Could not find polling today at $CENTRAL_AGENT_LOG"
 fi
@@ -549,14 +570,14 @@ IMAGES=$(glance image-list | awk '/active/ {print $4}' | tr '\n' ' ')
 COUNT_IMAGES=$(echo $IMAGES | wc -w)
 for NAME in $METRICS; do
 	printf "Check Monasca metrics for $NAME... "
-	URL_PATH="/metrics?name=$NAME&dimensions=region:$REGION"
-	RESPONSE=$(printf_monasca_query "$URL_PATH")
+	QUERY="/metrics?name=$NAME&dimensions=region:$REGION"
+	RESPONSE=$(printf_monasca_query "$QUERY")
 	RESOURCES=$(echo "$RESPONSE" | awk -F'"' '/"resource_id"/ {print $4}')
 	COUNT=$(echo "$RESOURCES" | wc -w)
 	if [ $COUNT -ge $COUNT_IMAGES ]; then
 		printf_ok "OK ($COUNT metrics out or $COUNT_IMAGES images)"
 	else
-		printf_fail "Failed"
+		printf_fail "Missing metrics"
 		[ -n "$VERBOSE" ] && printf_curl
 
 	fi
@@ -569,8 +590,8 @@ FILTER="start_time=$START_TODAY&merge_metrics=true"
 METRICS="$METRICS_FOR_IMAGES"
 for NAME in $METRICS; do
 	printf "Check Monasca recent measurements for $NAME... "
-	URL_PATH="/metrics/measurements?name=$NAME&dimensions=region:$REGION"
-	RESPONSE=$(printf_monasca_query "$URL_PATH&$FILTER")
+	QUERY="/metrics/measurements?name=$NAME&dimensions=region:$REGION"
+	RESPONSE=$(printf_monasca_query "$QUERY&$FILTER")
 	COUNT=$(echo "$RESPONSE" | grep -v '"id"' | grep 'Z"' | wc -l)
 	eval RES_COUNT=\$COUNT_$NAME
 	if [ $COUNT -gt 0 ]; then
@@ -603,8 +624,8 @@ fi
 FILE=$PIPELINE_CONF
 for NAME in $COMPUTE_NODES; do
 	printf "Check Ceilometer polling frequency at compute node $NAME... "
-	AWK="awk -F: '/interval/ {print \$2; exit}' $FILE"
 	REMOTE="$SSH $NAME"
+	AWK="awk -F: '/interval/ {print \$2; exit}' $FILE"
 	POLL_RATE=$($REMOTE "$AWK" 2>/dev/null | trim)
 	if [ -z "$SSH" ]; then
 		printf_fail "Skipped"
@@ -619,17 +640,31 @@ done
 
 # Check Ceilometer entry points at compute nodes
 FILE=$PYTHON_DIST_PKG/ceilometer-*.egg-info/entry_points.txt
+POINTS="compute.info.*HostPollster \
+	memory.usage.*MemoryUsagePollster \
+	memory.resident.*MemoryResidentPollster \
+	disk.capacity.*CapacityPollster \
+	cpu.*CPUPollster"
 for NAME in $COMPUTE_NODES; do
 	printf "Check Ceilometer entry points at compute node $NAME... "
-	SED="sed -n '/\[ceilometer.poll.compute\]/,/\[/ p' $FILE"
-	REMOTE="$SSH $NAME"
-	INFO=$($REMOTE "$SED" 2>/dev/null | grep 'compute.info.*HostPollster')
 	if [ -z "$SSH" ]; then
 		printf_fail "Skipped"
-	elif [ -z "$INFO" ]; then
-		printf_fail "Could not find 'compute.info' entry point"
-	else
-		printf_ok "OK ($INFO)"
+		continue
+	fi
+	REMOTE="$SSH $NAME"
+	SED="sed -n '/\[ceilometer.poll.compute\]/,/\[/ p' $FILE"
+	POLL_COMPUTE_SECTION=$($REMOTE "$SED" 2>/dev/null)
+	for PATTERN in $POINTS; do
+		ENTRY=$(echo "$POLL_COMPUTE_SECTION" | grep $PATTERN)
+		if [ -z "$ENTRY" ]; then
+			POLLSTER=$(echo "$PATTERN" | sed 's/\(.*\)\.\*.*/\1/')
+			printf_fail "Could not find '$POLLSTER' entry point"
+			break
+		fi
+	done
+	if [ -n "$ENTRY" ]; then
+		LIST=$(echo "$POINTS" | tr '\t' '\n' | sed 's/\(.*\)\.\*.*/\1/')
+		printf_ok "OK ($(echo $LIST))"
 	fi
 done
 
@@ -680,15 +715,15 @@ METRICS="$METRICS_FOR_COMPUTE_NODES"
 for NAME in $METRICS; do
 	printf "Check Monasca recent measurements for $NAME... "
 	# get metrics
-	URL_PATH="/metrics?name=$NAME&dimensions=region:$REGION"
-	RESPONSE=$(printf_monasca_query "$URL_PATH")
+	QUERY="/metrics?name=$NAME&dimensions=region:$REGION"
+	RESPONSE=$(printf_monasca_query "$QUERY")
 	RESOURCES=$(echo "$RESPONSE" | awk -F'"' '/resource_id/ {print $4}')
 	NODE_NAMES=$(echo "$RESOURCES" | sed 's/\(.*\)_\1/\1/' | tr '\n' ' ')
 	NODE_COUNT=$(echo "$NODE_NAMES" | wc -w)
 	NODE_MSG="$NODE_COUNT metrics out of $COUNT_COMPUTE_NODES compute nodes"
 	# get measurements
-	URL_PATH="/metrics/measurements?name=$NAME&dimensions=region:$REGION"
-	MEASUREMENTS=$(printf_monasca_query "$URL_PATH&$FILTER")
+	QUERY="/metrics/measurements?name=$NAME&dimensions=region:$REGION"
+	MEASUREMENTS=$(printf_monasca_query "$QUERY&$FILTER")
 	COUNT=$(echo "$MEASUREMENTS" | grep -v '"id"' | grep 'Z"' | wc -l)
 	if [ $COUNT -gt 0 -a $NODE_COUNT -ge $COUNT_COMPUTE_NODES ]; then
 		printf_ok "OK ($COUNT measurements, $NODE_MSG)"
@@ -708,14 +743,14 @@ METRIC=process.pid_count
 for COMPONENT in $METRICS_FOR_HOST_SERVICES; do
 	printf "Check Monasca metrics for $COMPONENT... "
 	DIMENSIONS="region:$REGION,component:$COMPONENT"
-	URL_PATH="/metrics?name=$METRIC&dimensions=$DIMENSIONS"
-	RESPONSE=$(printf_monasca_query "$URL_PATH")
+	QUERY="/metrics?name=$METRIC&dimensions=$DIMENSIONS"
+	RESPONSE=$(printf_monasca_query "$QUERY")
 	RESOURCES=$(echo "$RESPONSE" | awk -F'"' '/"hostname"/ {print $4}')
 	COUNT=$(echo "$RESOURCES" | wc -w)
 	if [ $COUNT -gt 0 ]; then
 		printf_ok "OK ($COUNT metrics for $COMPONENT)"
 	else
-		printf_fail "Failed"
+		printf_fail "Missing metrics"
 		[ -n "$VERBOSE" ] && printf_curl
 
 	fi
@@ -730,13 +765,14 @@ METRIC=process.pid_count
 for COMPONENT in $METRICS_FOR_HOST_SERVICES; do
 	printf "Check Monasca recent measurements for $COMPONENT... "
 	DIMENSIONS="region:$REGION,component:$COMPONENT"
-	URL_PATH="/metrics/measurements?name=$METRIC&dimensions=$DIMENSIONS"
-	RESPONSE=$(printf_monasca_query "$URL_PATH&$FILTER")
+	QUERY="/metrics/measurements?name=$METRIC&dimensions=$DIMENSIONS"
+	RESPONSE=$(printf_monasca_query "$QUERY&$FILTER")
 	COUNT=$(echo "$RESPONSE" | grep -v '"id"' | grep 'Z"' | wc -l)
 	NAME=$(echo "$COMPONENT" | tr '-' '_')
 	eval RES_COUNT=\$COUNT_$NAME
 	if [ $COUNT -gt 0 ]; then
 		printf_ok "OK ($COUNT measurements, $RES_COUNT resources)"
+		[ -n "$VERBOSE" ] && printf_measurements "$QUERY" "$FILTER"
 	else
 		printf_fail "No measurements found"
 		[ -n "$VERBOSE" ] && printf_curl
@@ -748,36 +784,48 @@ printf "Check Monasca metrics for active VMs... "
 VMS=$(nova list --all-tenants | awk '/ACTIVE/ {print $2}' | tr '\n' ' ')
 COUNT_VMS=$(echo $VMS | wc -w)
 METRIC=instance
-URL_PATH="/metrics?name=$METRIC&dimensions=region:$REGION"
-RESPONSE=$(printf_monasca_query "$URL_PATH")
+QUERY="/metrics?name=$METRIC&dimensions=region:$REGION"
+RESPONSE=$(printf_monasca_query "$QUERY")
 RESOURCES=$(echo "$RESPONSE" | awk -F'"' '/"resource_id"/ {print $4}')
 COUNT=$(echo "$RESOURCES" | wc -w)
 if [ $COUNT -ge $COUNT_VMS ]; then
 	printf_ok "OK ($COUNT metrics out or $COUNT_VMS active VMs)"
 else
-	printf_fail "Failed"
+	printf_fail "Missing metrics"
 	[ -n "$VERBOSE" ] && printf_curl
 fi
 
 # Check Monasca recent measurements for active VMs
 START=$(date -u -d @$SOME_TIME_AGO +%Y-%m-%dT%H:%M:%SZ)
 FILTER="start_time=$START&merge_metrics=true"
-PATTERN=$(echo $METRICS_FOR_VMS | sed 's/\(\w*\)/"\1"/g' | tr ' ' '|')
-COUNT_METADATA=$(echo $METRICS_FOR_VMS | wc -w)
-METRIC=instance
+METRICS=$(echo $METRICS_FOR_VMS | awk -F: -v RS=' ' '{print $1}' | sort -u)
+INSTANCE_METADATA=$(echo $METRICS_FOR_VMS | awk -F: -v RS=' ' '{print $2}')
+PATTERN=$(echo $INSTANCE_METADATA | sed 's/\(\w*\)/"\1"/g' | tr ' ' '|')
+EXPECTED=$(echo $METRICS $INSTANCE_METADATA)
+COUNT_EXPECTED=$(echo $EXPECTED | wc -w)
 for ID in $VMS; do
 	printf "Check Monasca recent measurements for active VM $ID... "
 	DIMENSIONS="region:$REGION,resource_id:$ID"
-	URL_PATH="/metrics/measurements?name=$METRIC&dimensions=$DIMENSIONS"
-	RESPONSE=$(printf_monasca_query "$URL_PATH&$FILTER" | egrep "$PATTERN")
-	METADATA=$(echo "$RESPONSE" | awk -F'"' '{print $2}' | sort -u)
-	COUNT=$(echo "$METADATA" | wc -w)
-	if [ $COUNT -ge $COUNT_METADATA ]; then
-		printf_ok "OK ($COUNT: $(echo $METADATA))"
-	elif [ $COUNT -gt 0 ]; then
-		printf_warn "$COUNT out of $COUNT_METADATA ($(echo $METADATA))"
+	ACTUAL=""
+	for NAME in $METRICS; do
+		QUERY="/metrics/measurements?name=$NAME&dimensions=$DIMENSIONS"
+		RESPONSE=$(printf_monasca_query "$QUERY&$FILTER")
+		COUNT=$(echo "$RESPONSE" | grep -v '"id"' | grep 'Z"' | wc -l)
+		[ $COUNT -gt 0 ] && ACTUAL="$ACTUAL $NAME"
+	done
+	for NAME in "instance"; do
+		QUERY="/metrics/measurements?name=$NAME&dimensions=$DIMENSIONS"
+		DATA=$(printf_monasca_query "$QUERY&$FILTER" | egrep "$PATTERN")
+		METADATA=$(echo "$DATA" | awk -F'"' '{print $2}' | sort -u)
+		ACTUAL=$(echo $ACTUAL $METADATA)
+	done
+	COUNT_ACTUAL=$(echo $ACTUAL | wc -w)
+	if [ $COUNT_ACTUAL -ge $COUNT_EXPECTED ]; then
+		printf_ok "OK ($COUNT_ACTUAL: $EXPECTED)"
+	elif [ $COUNT_ACTUAL -gt 0 ]; then
+		printf_warn "$COUNT_ACTUAL out of $COUNT_EXPECTED ($ACTUAL)"
 	else
-		printf_fail "Failed"
+		printf_fail "No measurements found"
 		[ -n "$VERBOSE" ] && printf_curl
 	fi
 done
