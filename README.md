@@ -284,7 +284,7 @@ send samples to Monasca:
    ```
 
    Additionally, please create a text file at `/usr/lib/python2.7/dist-packages/ceilometer-2015.1.*.egg-info` to record
-   the exact version of Ceilosca being manually installed:
+   the exact version of Ceilosca being manually installed. For instance, when installing version "2015.1-FIWARE":
 
    ```
    # VERSION=2015.1-FIWARE
@@ -310,8 +310,17 @@ send samples to Monasca:
    monasca-ceilometer/etc/ceilometer/monasca_field_definitions.yaml
    ```
 
-   Please ensure elements __meter_source__ and  __meter_sink__ are set up to send to Monasca the subset of Ceilometer
-   metrics required by FIWARE Monitoring.
+   Please ensure elements in __meter_source__ include the subset of Ceilometer metrics required by FIWARE Monitoring
+   (this should be the case without any modifications) and don't forget to set *Monasca endpoint at Master Node* in
+   the publishers of __meter_sink__:
+   ```
+   sinks:
+       - name: meter_sink
+         transformers:
+         publishers:
+             - notifier://
+             - monasca://http://MONASCA_API:8070/v2.0
+   ```
 
 5. Modify `/etc/ceilometer/ceilometer.conf` to configure a new meter storage driver for Ceilometer (*substitute with the
    endpoint of Master Node*):
