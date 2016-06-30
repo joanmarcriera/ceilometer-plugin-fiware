@@ -261,7 +261,7 @@ __NOT NEEDED IF YOU HAVE A CEILOMETER FOR OPENSTACK KILO__
 
 #### Monasca Ceilometer plugin
 
-Please follow these steps to install in all controller nodes the Python plugin and storage driver for Ceilometer to
+Please follow these steps to install in __all controller nodes__ the Python plugin and storage driver for Ceilometer to
 send samples to Monasca:
 
 1. Install python-monascaclient:
@@ -284,10 +284,10 @@ send samples to Monasca:
    ```
 
    Additionally, please create a text file at `/usr/lib/python2.7/dist-packages/ceilometer-2015.1.*.egg-info` to record
-   the exact version of Ceilosca being manually installed. For instance, when installing version "2015.1-FIWARE":
+   the exact version of Ceilosca being manually installed. For instance, when installing version "2015.1-FIWARE-5.3.3":
 
    ```
-   # VERSION=2015.1-FIWARE
+   # VERSION=2015.1-FIWARE-5.3.3
    # echo version=$VERSION > /usr/lib/python2.7/dist-packages/ceilometer-2015.1.*.egg-info/ceilosca.txt
    ```
 
@@ -303,7 +303,7 @@ send samples to Monasca:
    monasca = ceilometer.storage.impl_monasca_filtered:Connection
    ```
 
-4. Copy the following configuration files from Monasca-Ceilometer repository into `/etc/ceilometer`:
+4. Copy (or merge) the following configuration files from Monasca-Ceilometer repository into `/etc/ceilometer`:
 
    ```
    monasca-ceilometer/etc/ceilometer/pipeline.yaml
