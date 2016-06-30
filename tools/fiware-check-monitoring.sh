@@ -1,4 +1,5 @@
 #!/bin/sh
+# -*- coding: utf-8; version: 1.1.0 -*-
 #
 # Copyright 2016 Telefónica I+D
 # All Rights Reserved.
@@ -20,12 +21,13 @@
 # Perform several checks to verify FIWARE Monitoring configuration
 #
 # Usage:
-#   $0 --help
+#   $0 --help | --version
 #   $0 [--verbose] [--region=NAME] [--poll-threshold=SECS] [--measure-time=MINS]
 #   __ [--ssh-key=FILE]
 #
 # Options:
 #   -h, --help 			show this help message and exit
+#   -V, --version 		show version information and exit
 #   -v, --verbose 		show verbose messages
 #   -r, --region=NAME 		region name (if not given, taken from nova.conf)
 #   -p, --poll-threshold=SECS 	threshold warning polling frequency (seconds)
@@ -43,7 +45,8 @@
 #   OS_PROJECT_DOMAIN_NAME	default value for nova --os-project-domain-name
 #
 
-OPTS='h(help)v(verbose)r(region):p(poll-threshold):m(measure-time):k(ssh-key):'
+OPTS="v(verbose)r(region):p(poll-threshold):m(measure-time):k(ssh-key):"
+OPTS="${OPTS}h(help)V(version)"
 PROG=$(basename $0)
 
 # Files
@@ -74,7 +77,7 @@ VERBOSE=
 OPTERR=
 OPTSTR=$(echo :-:$OPTS | sed 's/([-_a-zA-Z0-9]*)//g')
 OPTHLP=$(awk '/^# *__/ { $2=sprintf("  %*s",'${#PROG}'," ") } { print }' $0 \
-	| sed -n '20,/^$/ { s/$0/'$PROG'/; s/^#[ ]\?//; p }')
+	| sed -n '21,/^$/ { s/$0/'$PROG'/; s/^#[ ]\?//; p }')
 while getopts $OPTSTR OPT; do while [ -z "$OPTERR" ]; do
 case $OPT in
 'v')	VERBOSE=true;;
@@ -83,6 +86,8 @@ case $OPT in
 'm')	MEASURE_TIME=$OPTARG;;
 'k')	SSH_KEY=$OPTARG;;
 'h')	OPTERR="$OPTHLP";;
+'V')	OPTERR=$(awk '/-\*-/ {print "v" $(NF-1) "\n"}' $0);
+	printf "$OPTERR\n" 1>&2; exit 1;;
 '?')	OPTERR="Unknown option -$OPTARG";;
 ':')	OPTERR="Missing value for option -$OPTARG";;
 '-')	OPTLONG="${OPTARG%=*}";
@@ -214,10 +219,11 @@ METRICS_FOR_VMS="\
 	instance:status \
 	instance:image_ref \
 	instance:instance_type \
+	cpu_util \
 	memory.usage \
-	memory.resident \
-	disk.capacity \
-	cpu_util"
+	memory \
+	disk.usage \
+	disk.capacity"
 
 METRICS_FOR_REGIONS="\
 	region.used_ip \
@@ -641,10 +647,10 @@ done
 # Check Ceilometer entry points at compute nodes
 FILE=$PYTHON_DIST_PKG/ceilometer-*.egg-info/entry_points.txt
 POINTS="compute.info.*HostPollster \
+	cpu.*CPUPollster \
 	memory.usage.*MemoryUsagePollster \
-	memory.resident.*MemoryResidentPollster \
-	disk.capacity.*CapacityPollster \
-	cpu.*CPUPollster"
+	disk.usage.*disk:PhysicalPollster \
+	disk.capacity.*CapacityPollster"
 for NAME in $COMPUTE_NODES; do
 	printf "Check Ceilometer entry points at compute node $NAME... "
 	if [ -z "$SSH" ]; then
