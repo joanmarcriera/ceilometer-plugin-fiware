@@ -8,13 +8,18 @@ The following figure describes the high level architecture of the monitoring sys
 
 Data is collected through [Ceilometer][ceilometer] (where customized pollsters have been developed) from each node.
 Relevant metrics are sent to [Monasca][monasca] on master node using [Monasca-Ceilometer][monasca_ceilometer] plugin.
-[Sanity Check tool][fihealth_sanity_checks] also publishes the sanity status of the nodes directly to Monasca. Data
-is stored and eventually passed to the [FIWARE Big Data GE (Cosmos)][cosmos] for aggregation and analysis. Finally,
-[Infographics][fiware_lab_infographics] (but also other clients) retrieve the data from Monasca API.
+Additionally, the external [Sanity Check][fihealth_sanity_checks] tool from FIHealth publishes the sanity status of the
+nodes directly to Monasca.
 
-This repository contains all the pollsters and the additional customization that Infrastructure Owners (IOs) have to
-perform. IOs should customize the standard Ceilometer installation by adding some pollsters and by editing several
-configuration files.
+Monitoring data is stored at Monasca master node and eventually passed to the [FIWARE Big Data GE (Cosmos)][cosmos] for
+aggregation and analysis. [FIWARE Lab Monitoring API][fiware_lab_monitoring_api] component makes such data available to
+different clients, particularly to [Infographics][fiware_lab_infographics]. This way Infrastructure Owners (IOs) should
+be able to track the following resources of their Openstack environments:
+- __region__
+- __hosts__
+- __images__
+- __host services__ _(OpenStack services: nova, glance, cinder, ... )_
+- __instances__ (i.e. VMs)
 
 Some additional information about Ceilometer: _it is a tool created in order to handle the [Telemetry][telemetry]
 requirements of an OpenStack environment (this includes use cases such as metering, monitoring, and alarming to
@@ -23,18 +28,12 @@ name a few)_.
 ![Ceilometer Architecture][ceilometer_architecture_pict]
 _Figure taken from [Ceilometer documentation][ceilometer_architecture_doc]_
 
-After installation and configuration, IOs should be able to obtain monitoring information about the following resources
-of their Openstack environments at Infographics page or by querying Federation Monitoring API:
-- __region__
-- __hosts__
-- __images__
-- __host services__ _(OpenStack services: nova, glance, cinder, ... )_
-- __vm__ (i.e. instances)
-
 
 ## Installation
 
-The installation and configuration procedure involves both the central nodes (i.e. controllers) and the compute nodes.
+The installation and configuration procedure involves both *Central agent pollsters* at the controller nodes and
+*Compute agent pollsters* at every compute node. This repository contains all the pollsters and files that IOs would
+need to customize the default Ceilometer installation.
 
 ### Central agent pollsters
 
@@ -56,25 +55,33 @@ Please follow these steps:
 
    Pay attention to the `netlist` attribute: the names of external networks in your OpenStack installation.
 
-2. Copy the folder [region](/region) from this repository into Ceilometer package (typically located at the folder
-   `/usr/lib/python2.7/dist-packages/ceilometer`).
+2. Locate the installation directory of Ceilometer package (usually, `pip` command would show such information):
 
-   After that, `RegionPollster` class should be available:
+   ```
+   # pip show ceilometer
+   ---
+   Name: ceilometer
+   Version: 2015.1.1
+   Location: /usr/lib/python2.7/dist-packages
+   ```
+
+3. Copy [region](/region) directory structure from this repository into Ceilometer package location (by default, at
+   `/usr/lib/python2.7/dist-packages/ceilometer`). After that, `RegionPollster` class should be available:
 
    ```
    # python -c 'from ceilometer.region import region; print region.RegionPollster().__class__'
    <class 'ceilometer.region.region.RegionPollster'>
    ```
 
-3. Edit entry points file of your installed version of Ceilometer (i.e., for version 2015.1.2 should be located at path
-   `/usr/lib/python2.7/dist-packages/ceilometer-2015.1.2.egg-info/entry_points.txt`) and please add the new pollster at
+4. Locate the entry points file for Ceilometer (which depends on the version: for 2015.1.1, should be located at path
+   `/usr/lib/python2.7/dist-packages/ceilometer-2015.1.1.egg-info/entry_points.txt`) and please add the new pollster at
    the `[ceilometer.poll.central]` section:
 
    ```
    region = ceilometer.region.region:RegionPollster
    ```
 
-4. Restart Ceilometer Central Agent:
+5. Restart Ceilometer Central Agent:
 
    If using Fuel HA:
    ```
@@ -85,53 +92,17 @@ Please follow these steps:
    # service ceilometer-agent-central restart
    ```
 
-5. Check if Ceilometer is able to retrieve information about the region (remember to replace _RegionOne_ with the name
-   of your region):
-
-   ```
-   # ceilometer resource-list -q resource_id=RegionOne
-   +-------------+-----------+---------+------------+
-   | Resource ID | Source    | User ID | Project ID |
-   +-------------+-----------+---------+------------+
-   | RegionOne   | openstack | None    | None       |
-   +-------------+-----------+---------+------------+
-   ```
-   ```
-   # ceilometer resource-show RegionOne
-   +-------------+------------------------------------------+
-   | Property    | Value                                    |
-   +-------------+------------------------------------------+
-   | metadata    | {'name': 'RegionOne', 'longitude': ....} |
-   | project_id  | None                                     |
-   | resource_id | RegionOne                                |
-   | source      | openstack                                |
-   | user_id     | None                                     |
-   +-------------+------------------------------------------+
-   ```
-
 #### Pollster for image
 
 __NOT NEEDED IF YOU HAVE A CEILOMETER FOR OPENSTACK KILO__
 
-The pollster for the images is already provided by a standard installation of Ceilometer. Check if it is enabled at the
-entry points:
+The pollster for the images is already provided by a standard installation of Ceilometer. Please check if it is included
+in entry points:
 
-1. Open the file: `/usr/lib/python2.7/dist-packages/ceilometer-2015.1.2.egg-info/entry_points.txt` and look for this
-   entry at the `[ceilometer.notification]` section:
+1. Open the entry points file and look for this entry at the `[ceilometer.notification]` section:
 
    ```
    image = ceilometer.image.notifications:Image
-   ```
-
-2. Check if one of your images is available and provided with all the needed information
-
-   ```
-   # ceilometer meter-list | grep image
-   +-------+-------+-------+----------------+---------+------------+
-   | Name  | Type  | Unit  | Resource ID    | User ID | Project ID |
-   +-------+-------+-------+----------------+---------+------------+
-   | image | gauge | image | aa-bb-cc-dd-ee | None    | 0000000000 |
-   +-------+-------+-------+----------------+---------+------------+
    ```
 
 
@@ -146,18 +117,16 @@ entry points:
    notification_driver = messagingv2
    ```
 
-2. Copy [host.py](/compute_pollster/host.py) file from the [compute_pollster](/compute_pollster) folder into the compute
-   pollsters folder of the Ceilometer package at `/usr/lib/python2.7/dist-packages/ceilometer/compute/pollsters`
-
-   After that, `HostPollster` class should be available:
+2. Copy [host.py](/compute_pollster/host.py) file from the [compute_pollster](/compute_pollster) directory of this
+   repository into the `compute/pollsters/` subdirectory at Ceilometer package location. After that, `HostPollster`
+   class should be available:
 
    ```
    # python -c 'from ceilometer.compute.pollsters import host; print host.HostPollster().__class__'
    <class 'ceilometer.compute.pollsters.host.HostPollster'>
    ```
 
-3. Edit Ceilometer entry points file (`/usr/lib/python2.7/dist-packages/ceilometer-2015.1.2.egg-info/entry_points.txt`)
-   to add the new pollster at the `[ceilometer.poll.compute]` section:
+3. Edit entry points file to add the new pollster at the `[ceilometer.poll.compute]` section:
 
    ```
    compute.info = ceilometer.compute.pollsters.host:HostPollster
@@ -166,33 +135,12 @@ entry points:
 4. Please check the polling frequency defined by `interval` parameter at `/etc/ceilometer/pipeline.yaml`. Its default
    value is 60 seconds: you may consider lowering the polling rate.
 
-5. Restart both Nova Compute and Ceilometer Compute Agent, and check if you are able to retrieve the host information
-   from Ceilometer (pay attention to the __compute.node.cpu.percent__, which is linked to the Nova configuration, and
-   please note that the resource_id is the concatenation \<_host_\>\_\<_nodename_\>, values which are usually the same)
+5. Restart both Nova Compute and Ceilometer Compute Agent:
 
    ```
    # service nova-compute restart
    # service ceilometer-agent-compute restart
    ```
-
-   ```
-   # ceilometer meter-list | grep compute.node
-   +--------------------------+-------+------+---------------------------+---------+------------+
-   | Name                     | Type  | Unit | Resource ID               | User ID | Project ID |
-   +--------------------------+-------+------+---------------------------+---------+------------+
-   | compute.node.cpu.percent | gauge | %    | node-2.aa.bb_node-2.aa.bb | None    | None       |
-   | compute.node.cpu.max     | gauge | cpu  | node-2.aa.bb_node-2.aa.bb | None    | None       |
-   | compute.node.cpu.now     | gauge | cpu  | node-2.aa.bb_node-2.aa.bb | None    | None       |
-   | compute.node.cpu.tot     | gauge | cpu  | node-2.aa.bb_node-2.aa.bb | None    | None       |
-   | compute.node.disk.max    | gauge | GB   | node-2.aa.bb_node-2.aa.bb | None    | None       |
-   | compute.node.disk.now    | gauge | GB   | node-2.aa.bb_node-2.aa.bb | None    | None       |
-   | compute.node.disk.tot    | gauge | GB   | node-2.aa.bb_node-2.aa.bb | None    | None       |
-   | compute.node.ram.max     | gauge | MB   | node-2.aa.bb_node-2.aa.bb | None    | None       |
-   | compute.node.ram.now     | gauge | MB   | node-2.aa.bb_node-2.aa.bb | None    | None       |
-   | compute.node.ram.tot     | gauge | MB   | node-2.aa.bb_node-2.aa.bb | None    | None       |
-   +--------------------------+-------+------+---------------------------+---------+------------+
-   ```
-
 
 #### Pollster for vm
 
@@ -210,50 +158,19 @@ __NOT NEEDED IF YOU HAVE A CEILOMETER FOR OPENSTACK KILO__
 4. Replace file `/usr/lib/python2.7/dist-packages/ceilometer/compute/pollsters/disk.py` with that at location
    [compute_pollster/disk.py](/compute_pollster/disk.py) in this repository
 
-5. Edit Ceilometer entry points file (`/usr/lib/python2.7/dist-packages/ceilometer-2015.1.2.egg-info/entry_points.txt`)
-   to add the new pollsters at the `[ceilometer.poll.compute]` section:
+5. Edit entry points file and ensure these entries are found at the `[ceilometer.poll.compute]` section:
 
    ```
+   memory = ceilometer.compute.notifications.instance:Memory
    memory.usage = ceilometer.compute.pollsters.memory:MemoryUsagePollster
-   memory.resident = ceilometer.compute.pollsters.memory:MemoryResidentPollster
    disk.capacity = ceilometer.compute.pollsters.disk:CapacityPollster
+   disk.usage = ceilometer.compute.pollsters.disk:PhysicalPollster
    ```
 
-6. Restart Compute Agent and check if you are able to retrieve information about one of your VMs (disk and memory):
+6. Restart Compute Agent.
 
    ```
-   # ceilometer meter-list | grep 'disk.capacity'
-   +--------------------------+-------+------+---------------------------+---------+------------+
-   | Name                     | Type  | Unit | Resource ID               | User ID | Project ID |
-   +--------------------------+-------+------+---------------------------+---------+------------+
-   | disk.capacity            | gauge | B    | aa-bb-cc-dd-ee            | user1   |  project1  |
-   +--------------------------+-------+------+---------------------------+---------+------------+
-   ```
-   ```
-   # ceilometer sample-list -m disk.capacity -q"resource_id=aa-bb-cc-dd-ee"
-   +----------------+---------------+-------+--------------+------+---------------------+
-   | Resource ID    | Name          | Type  | Volume       | Unit | Timestamp           |
-   +----------------+---------------+-------+--------------+------+---------------------+
-   | aa-bb-cc-dd-ee | disk.capacity | gauge | 3221225472.0 | B    | 2015-11-11T15:38:43 |
-   +----------------+---------------+-------+--------------+------+---------------------+
-   ```
-   ```
-   # ceilometer meter-list | grep 'memory.'
-   +-----------------+-------+------+-----------------+---------+------------+
-   | Name            | Type  | Unit | Resource ID     | User ID | Project ID |
-   +-----------------+-------+------+-----------------+---------+------------+
-   | memory          | gauge | MB    | aa-bb-cc-dd-ee | user1   |  project1  |
-   | memory.resident | gauge | MB    | aa-bb-cc-dd-ee | user1   |  project1  |
-   | memory.usage    | gauge | MB    | aa-bb-cc-dd-ee | user1   |  project1  |
-   +-----------------+-------+------+-----------------+---------+------------+
-   ```
-   ```
-   # ceilometer sample-list -m memory.usage -q"resource_id=aa-bb-cc-dd-ee"
-   +----------------+---------------+-------+------------+------+---------------------+
-   | Resource ID    | Name          | Type  | Volume     | Unit | Timestamp           |
-   +----------------+---------------+-------+------------+------+---------------------+
-   | aa-bb-cc-dd-ee | memory.usage  | gauge | 101.0      | MB   | 2015-11-11T15:38:43 |
-   +----------------+---------------+-------+------------+------+---------------------+
+   # service ceilometer-agent-compute restart
    ```
 
 
@@ -271,8 +188,7 @@ send samples to Monasca:
    ```
 
 2. Copy the following files from *Ceilosca* component (included in the [latest release][monasca_ceilometer_releases]
-   of [Monasca-Ceilometer][monasca_ceilometer]) into the Ceilometer package at your Python installation directory
-   (usually `/usr/lib/python2.7/dist-packages/ceilometer`):
+   of [Monasca-Ceilometer][monasca_ceilometer]) into the Ceilometer package location:
 
    ```
    monasca-ceilometer/ceilosca/ceilometer/monasca_client.py
@@ -291,7 +207,7 @@ send samples to Monasca:
    # echo version=$VERSION > /usr/lib/python2.7/dist-packages/ceilometer-2015.1.*.egg-info/ceilosca.txt
    ```
 
-3. Edit `/usr/lib/python2.7/dist-packages/ceilometer-2015.1.*.egg-info/entry_points.txt` to add the following entries:
+3. Edit the entry points file to add the following entries:
 
    At `[ceilometer.publisher]` section:
    ```
@@ -332,7 +248,7 @@ send samples to Monasca:
    Please make sure the user specified under `[service_credentials]` section of the same file has __monasca_user__
    role added.
 
-7. Restart all Ceilometer services:
+6. Restart all Ceilometer services:
 
    If using Fuel HA:
    ```
@@ -397,7 +313,7 @@ installed in all the controllers:
    ```
 
 5. Only the file `process.yaml` used by [Process Checks plugin][monasca_agent_plugin_process_checks] is required at
-   `/etc/monasca/agent/conf.d/`. Please ensure it is configured to monitor all Openstack services (this should be the
+   `/etc/monasca/agent/conf.d/`. Please ensure it is configured to monitor all OpenStack services (this should be the
    case without any modifications, but it is appropriate to check that all of your services are monitored). The example
    below shows configuration information for one service (nova-scheduler):
 
@@ -428,19 +344,98 @@ installed in all the controllers:
 
 ## Verification
 
+### Overall checks
+
 In order to verify whether the installation and configuration of FIWARE Monitoring have been successful, we provide the
 [fiware-check-monitoring.sh](/tools/fiware-check-monitoring.sh) script available at [tools](/tools) folder. It performs
 a set of checks, not only in the controller itself but also in the compute nodes, and shows results in a human-readable
 manner.
 
-Running the script with no additional parameters may suffice in most of the cases, but some adjustments could be done
-with command line options. It only requires defining the standard OpenStack environment variables with the credentials
-needed to run `nova` and other commands.
+Running the script at the controllers with no additional parameters may suffice in most of the cases, although command
+line options allow further adjustments. Script only requires defining the standard OpenStack environment variables with
+the credentials needed to run `nova` and other commands.
 
-For full information about the usage and options, please type:
+For full information about the usage and options, please type: `fiware-check-monitoring.sh --help`
+
+### Ceilometer queries
+
+The former script will give us very comprehensive information about the installation and will also retrieve real metrics
+and measurements to ensure FIWARE Monitoring is working properly. In any case, we could *optionally* try some queries
+using the command line client of Ceilometer, like these:
+
+*  Monitoring information about the region (please replace _RegionOne_ with yours):
 
    ```
-   # fiware-check-monitoring.sh --help
+   # ceilometer resource-list -q resource_id=RegionOne
+   +-------------+-----------+---------+------------+
+   | Resource ID | Source    | User ID | Project ID |
+   +-------------+-----------+---------+------------+
+   | RegionOne   | openstack | None    | None       |
+   +-------------+-----------+---------+------------+
+   ```
+
+*  Monitoring information about one of your compute nodes (please note that the metric resource_id is the concatenation
+   \<_host_\>\_\<_nodename_\>, values which are usually the same):
+
+   ```
+   # HOST_RESOURCE_ID=$(nova host-list | awk '/compute/ {print $2 "_" $2; exit}')
+   # ceilometer meter-list -q resource_id=$HOST_RESOURCE_ID
+   +--------------------------+-------+------+---------------------------+---------+------------+
+   | Name                     | Type  | Unit | Resource ID               | User ID | Project ID |
+   +--------------------------+-------+------+---------------------------+---------+------------+
+   | compute.node.cpu.percent | gauge | %    | node-2.aa.bb_node-2.aa.bb | None    | None       |
+   | compute.node.cpu.max     | gauge | cpu  | node-2.aa.bb_node-2.aa.bb | None    | None       |
+   | compute.node.cpu.now     | gauge | cpu  | node-2.aa.bb_node-2.aa.bb | None    | None       |
+   | compute.node.cpu.tot     | gauge | cpu  | node-2.aa.bb_node-2.aa.bb | None    | None       |
+   | compute.node.disk.max    | gauge | GB   | node-2.aa.bb_node-2.aa.bb | None    | None       |
+   | compute.node.disk.now    | gauge | GB   | node-2.aa.bb_node-2.aa.bb | None    | None       |
+   | compute.node.disk.tot    | gauge | GB   | node-2.aa.bb_node-2.aa.bb | None    | None       |
+   | compute.node.ram.max     | gauge | MB   | node-2.aa.bb_node-2.aa.bb | None    | None       |
+   | compute.node.ram.now     | gauge | MB   | node-2.aa.bb_node-2.aa.bb | None    | None       |
+   | compute.node.ram.tot     | gauge | MB   | node-2.aa.bb_node-2.aa.bb | None    | None       |
+   +--------------------------+-------+------+---------------------------+---------+------------+
+   ```
+
+*  Monitoring information about one of your images:
+
+   ```
+   # IMAGE_NAME="base_centos_6"
+   # IMAGE_RESOURCE_ID=$(nova image-show $IMAGE_NAME | awk '$2=="id" {print $4}')
+   # ceilometer meter-list -q resource_id=$IMAGE_RESOURCE_ID
+   +-------+-------+-------+--------------------------------------+---------+----------------------------------+
+   | Name  | Type  | Unit  | Resource ID                          | User ID | Project ID                       |
+   +-------+-------+-------+--------------------------------------+---------+----------------------------------+
+   | image | gauge | image | 66d7c0ee-3929-4dbf-ac8e-39e17f44c445 | None    | 00000000000003228460960090160000 |
+   +-------+-------+-------+--------------------------------------+---------+----------------------------------+
+   ```
+
+*  Monitoring information about one of the active instances:
+
+   ```
+   # INSTANCE_ID=$(nova list --all-tenants | awk '/ACTIVE/ {print $2; exit}')
+   # ceilometer meter-list -q resource_id=$INSTANCE_ID
+   +-----------------+-------+----------+--------------------------------------+----------+----------------------------------+
+   | Name            | Type  | Unit     | Resource ID                          | User ID  | Project ID                       |
+   +-----------------+-------+----------+--------------------------------------+----------+----------------------------------+
+   | instance        | gauge | instance | 389190e8-6b55-4260-8b74-ee3a073e729d | somebody | 00000000000000000000000000004980 |
+   | cpu_util        | gauge | %        | 389190e8-6b55-4260-8b74-ee3a073e729d | somebody | 00000000000000000000000000004980 |
+   | disk.capacity   | gauge | B        | 389190e8-6b55-4260-8b74-ee3a073e729d | somebody | 00000000000000000000000000004980 |
+   | disk.usage      | gauge | B        | 389190e8-6b55-4260-8b74-ee3a073e729d | somebody | 00000000000000000000000000004980 |
+   | memory          | gauge | MB       | 389190e8-6b55-4260-8b74-ee3a073e729d | somebody | 00000000000000000000000000004980 |
+   | memory.usage    | gauge | MB       | 389190e8-6b55-4260-8b74-ee3a073e729d | somebody | 00000000000000000000000000004980 |
+   +-----------------+-------+----------+--------------------------------------+----------+----------------------------------+
+   ```
+
+   To query for the exact measurement values:
+   ```
+   # ceilometer sample-list -q resource_id=$INSTANCE_ID -m memory.usage --limit 3
+   +--------------------------------------+--------------+-------+--------+------+---------------------------+
+   | Resource ID                          | Name         | Type  | Volume | Unit | Timestamp                 |
+   +--------------------------------------+--------------+-------+--------+------+---------------------------+
+   | 389190e8-6b55-4260-8b74-ee3a073e729d | memory.usage | gauge | 140.0  | MB   | 2016-06-16T11:25:44+00:00 |
+   | 389190e8-6b55-4260-8b74-ee3a073e729d | memory.usage | gauge | 140.0  | MB   | 2016-06-16T11:26:44+00:00 |
+   | 389190e8-6b55-4260-8b74-ee3a073e729d | memory.usage | gauge | 140.0  | MB   | 2016-06-16T11:27:44+00:00 |
+   +--------------------------------------+--------------+-------+--------+------+---------------------------+
    ```
 
 
@@ -499,6 +494,10 @@ https://github.com/Fiware/ops.Health/tree/master/fiware-region-sanity-tests
 [fiware_lab_infographics]:
 https://github.com/Fiware/ops.Fi-lab-infographics/blob/master/README.md
 "FIWARE Lab Infographics"
+
+[fiware_lab_monitoring_api]:
+https://github.com/SmartInfrastructures/FIWARELab-monitoringAPI
+"FIWARE Lab Monitoring API"
 
 [fiware_monitoring_architecture_pict]:
 /img/FIWARE_Monitoring_Arch.png
