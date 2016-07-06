@@ -7,6 +7,11 @@ The following figure describes the high level architecture of the monitoring sys
 
 ![FIWARE Monitoring Architecture][fiware_monitoring_architecture_pict]
 
+
+
+
+
+
 Data is collected through [Ceilometer][ceilometer] (where customized pollsters have been developed) from each node.
 Relevant metrics are sent to [Monasca][monasca] on master node using [Monasca-Ceilometer][monasca_ceilometer] plugin.
 Additionally, the external [Sanity Check][fihealth_sanity_checks] tool from FIHealth publishes the sanity status of the
