@@ -1,5 +1,5 @@
 #!/bin/sh
-# -*- coding: utf-8; version: 1.1.0 -*-
+# -*- coding: utf-8; version: 1.2.0 -*-
 #
 # Copyright 2016 Telefónica I+D
 # All Rights Reserved.
@@ -62,8 +62,10 @@ MONASCA_URL=
 MONASCA_USERNAME=
 MONASCA_PASSWORD=
 MONASCA_AGENT_HOME=
+MONASCA_AGENT_USER=
 CEILOMETER_PKG=
 PYTHON_DIST_PKG=
+AGENT_LOG_PREFIX=
 alias trim='tr -d \ '
 
 # Command line options defaults
@@ -295,12 +297,24 @@ else
 	printf_ok "$VERSION at $MONASCA_AGENT_HOME"
 fi
 
+# Check Monasca Agent (daemon user)
+printf "Check Monasca Agent daemon user... "
+MONASCA_AGENT_USER=$(awk -F: '/mon-/ {print $1}' /etc/passwd 2>/dev/null)
+if [ -z "$MONASCA_AGENT_USER" ]; then
+	printf_fail "Not found"
+elif [ "$(echo ~$MONASCA_AGENT_USER)" != "$MONASCA_AGENT_HOME" ]; then
+	printf_warn "$MONASCA_AGENT_USER (set $MONASCA_AGENT_HOME as home dir)"
+else
+	printf_ok "$MONASCA_AGENT_USER"
+fi
+
 # Check Monasca Agent (configuration)
 printf "Check Monasca Agent configuration... "
+MONASCA_AGENT_CHECK="$MONASCA_AGENT_HOME/bin/monasca-collector configcheck"
 if [ ! -r $MONASCA_AGENT_CONF ]; then
 	printf_fail "Configuration file $MONASCA_AGENT_CONF not found"
-elif ! service monasca-agent configtest >/dev/null 2>&1; then
-	printf_fail "Run \`service monasca-agent configtest' to check errors"
+elif ! su $MONASCA_AGENT_USER -c "$MONASCA_AGENT_CHECK" >/dev/null 2>&1; then
+	printf_fail "Run \`$MONASCA_AGENT_CHECK' to check errors"
 else
 	printf_ok "OK ($MONASCA_AGENT_CONF)"
 fi
@@ -403,6 +417,13 @@ fi
 
 # Check Ceilometer central agent logfile
 printf "Check Ceilometer central agent logfile... "
+for AGENT_LOG_PREFIX in "" "ceilometer-agent-"; do
+	FILE=/var/log/ceilometer/${AGENT_LOG_PREFIX}central.log
+	if [ -r $FILE ]; then
+		CENTRAL_AGENT_LOG=$FILE
+		break
+	fi
+done
 if [ -r "$CENTRAL_AGENT_LOG" ]; then
 	printf_ok "$CENTRAL_AGENT_LOG"
 else
@@ -411,8 +432,9 @@ fi
 
 # Check Ceilometer installation path and version
 printf "Check Ceilometer installation path and version... "
-PYTHON_DIST_PKG=$(python -c "import sys; \
-	print [dir for dir in sys.path if dir.endswith('dist-packages')][-1]")
+PYTHON_DIST_PKG=$(python -c "import sys; import re; \
+	pattern = re.compile(r'.*(dist|site)-packages\$'); \
+	print [dir for dir in sys.path if pattern.match(dir)][-1]")
 if [ -d "$PYTHON_DIST_PKG/ceilometer" ]; then
 	CEILOMETER_PKG="$PYTHON_DIST_PKG/ceilometer"
 	VERSION=$(pip show ceilometer | awk '/^Version:/ {print $2}')
@@ -691,6 +713,7 @@ for NAME in $COMPUTE_NODES; do
 done
 
 # Check last poll from host pollster at compute nodes
+COMPUTE_AGENT_LOG=/var/log/ceilometer/${AGENT_LOG_PREFIX}compute.log
 for NAME in $COMPUTE_NODES; do
 	printf "Check last poll from host pollster at compute node $NAME... "
 	PATTERN="$(date +%Y-%m-%d).*Polling pollster compute\.info"
