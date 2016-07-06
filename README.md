@@ -1,5 +1,6 @@
 # FIWARE Lab monitoring system (based on Ceilometer and Monasca)
 
+
 ## Description
 
 The following figure describes the high level architecture of the monitoring system.
